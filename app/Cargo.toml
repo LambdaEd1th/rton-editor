@@ -1,0 +1,32 @@
+[package]
+name = "rton-editor-rs-app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rton-editor-rs"
+path = "src/main.rs"
+
+[dependencies]
+dioxus-html = "0.7.0"
+dioxus_codemirror = { version = "0.3.1", features = ["lang-javascript", "lang-yaml"] }
+rton_editor_core = { path = "../crates/core" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dioxus = { version = "0.7.0", features = ["desktop"] }
+rfd = "0.17"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { version = "0.7.0", features = ["web"] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Blob",
+    "Document",
+    "Element",
+    "HtmlAnchorElement",
+    "Url",
+    "Window",
+] }
