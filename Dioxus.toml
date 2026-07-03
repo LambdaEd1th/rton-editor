@@ -1,10 +1,10 @@
 [application]
-name = "rton-editor-rs"
+name = "rton-editor"
 default_platform = "web"
 out_dir = "dist"
 
 [web.app]
-title = "RTON Editor RS"
+title = "RTON Editor"
 
 [desktop.app]
-title = "RTON Editor RS"
+title = "RTON Editor"

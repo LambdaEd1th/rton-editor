@@ -1,4 +1,4 @@
-# RTON Editor RS
+# RTON Editor
 
 Rust/Dioxus rewrite of the RTON editor for WebAssembly web builds and native
 desktop builds.
@@ -6,7 +6,7 @@ desktop builds.
 ## Layout
 
 ```text
-rton-editor-rs/
+rton-editor/
   app/          Dioxus UI and platform file export glue
   crates/core/  UI-free RTON editor core
 ```
@@ -49,31 +49,71 @@ cargo install dioxus-cli --locked
 ## Run Desktop
 
 ```bash
-cd rton-editor-rs
-cargo run -p rton-editor-rs-app
+cd rton-editor
+cargo run -p rton-editor-app
 ```
 
 ## Run Web
 
 ```bash
-cd rton-editor-rs
-dx serve --platform web
+cd rton-editor
+dx serve --platform web --package rton-editor-app
 ```
 
 ## Build Web
 
 ```bash
-cd rton-editor-rs
-dx build --platform web --release
+cd rton-editor
+dx build --platform web --package rton-editor-app --release
 ```
 
 The Dioxus project is configured to emit the static web build under `dist/`.
 
+## Runtime i18n
+
+Fluent files are loaded at startup instead of being embedded into the Rust
+binary or wasm module. Locale files live in one external directory:
+
+```text
+app/assets/i18n/en-US.ftl
+app/assets/i18n/zh-CN.ftl
+app/assets/i18n/fr-FR.ftl
+app/assets/i18n/ru-RU.ftl
+app/assets/i18n/es-ES.ftl
+```
+
+Users can edit these files directly or add more `.ftl` files.
+
+Desktop builds read one `assets/i18n/` directory at startup. During development
+that is usually `app/assets/i18n/`; packaged apps can place the same directory
+next to the executable:
+
+```text
+assets/i18n/de-DE.ftl
+assets/i18n/ja-JP.ftl
+```
+
+Web builds read translations from the static server at startup. Files that
+exist in `app/assets/i18n/` at build time are included in the generated i18n
+manifest; additional files can be discovered from the server directory listing
+when available:
+
+```text
+assets/i18n/de-DE.ftl
+assets/i18n/ja-JP.ftl
+```
+
+When serving a release build, the same files should be placed under
+`dist/assets/i18n/`. If the server does not expose directory listings, web
+builds can still load the manifest files but cannot discover arbitrary new
+locale files automatically. Missing translation keys fall back to English when
+`en-US.ftl` is loaded.
+
 ## Direct Checks
 
 ```bash
-cd rton-editor-rs
+cd rton-editor
 cargo check -p rton_editor_core
-cargo check -p rton-editor-rs-app
-cargo check -p rton-editor-rs-app --target wasm32-unknown-unknown
+cargo check -p rton-editor-app
+cargo check -p rton-editor-app --target wasm32-unknown-unknown
 ```

@@ -1,0 +1,42 @@
+#[cfg(target_arch = "wasm32")]
+use dioxus::prelude::*;
+
+use crate::i18n::{self, Locale};
+use crate::platform;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn load_i18n_sources() -> usize {
+    platform::read_i18n_sources()
+        .into_iter()
+        .filter(|source| i18n::install_locale(&source.code, &source.source).is_ok())
+        .count()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn load_i18n_sources_async() -> usize {
+    platform::read_i18n_sources_async()
+        .await
+        .into_iter()
+        .filter(|source| i18n::install_locale(&source.code, &source.source).is_ok())
+        .count()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn bump_i18n_revision(mut i18n_revision: Signal<u64>) {
+    let next_revision = *i18n_revision.read() + 1;
+    i18n_revision.set(next_revision);
+}
+
+pub(crate) fn initial_locale() -> Locale {
+    resolve_locale(
+        platform::read_locale_preference().as_deref(),
+        platform::system_locale().as_deref(),
+    )
+}
+
+pub(crate) fn resolve_locale(preference: Option<&str>, system_locale: Option<&str>) -> Locale {
+    preference
+        .and_then(Locale::supported_from_code)
+        .or_else(|| system_locale.and_then(Locale::supported_from_code))
+        .unwrap_or(Locale::EN_US)
+}

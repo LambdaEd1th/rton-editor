@@ -1,32 +1,56 @@
 [package]
-name = "rton-editor-rs-app"
+name = "rton-editor-app"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "rton-editor-rs"
+name = "rton-editor"
 path = "src/main.rs"
 
 [dependencies]
 dioxus-html = "0.7.0"
-dioxus_codemirror = { version = "0.3.1", features = ["lang-javascript", "lang-yaml"] }
+dioxus-free-icons = { version = "0.10.0", features = ["lucide"] }
+fluent-bundle = "0.16"
 rton_editor_core = { path = "../crates/core" }
+serde_json = "1"
+unic-langid = "0.9"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dioxus = { version = "0.7.0", features = ["desktop"] }
+futures-timer = "3"
+memmap2 = "0.9"
 rfd = "0.17"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { version = "0.7.0", features = ["web"] }
 js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
     "Blob",
+    "DataTransfer",
+    "DataTransferItem",
+    "DataTransferItemList",
     "Document",
+    "DragEvent",
     "Element",
+    "ErrorEvent",
+    "File",
+    "FileSystemDirectoryEntry",
+    "FileSystemDirectoryReader",
+    "FileSystemEntry",
+    "FileSystemFileEntry",
     "HtmlAnchorElement",
+    "MessageEvent",
+    "Navigator",
+    "Response",
+    "Storage",
     "Url",
     "Window",
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
 ] }
