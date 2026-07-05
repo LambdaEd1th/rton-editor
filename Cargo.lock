@@ -4441,6 +4441,7 @@ dependencies = [
  "futures-timer",
  "js-sys",
  "memmap2",
+ "rayon",
  "rfd",
  "rton_editor_core",
  "serde-wasm-bindgen",

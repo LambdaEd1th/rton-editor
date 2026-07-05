@@ -41,6 +41,7 @@ unic-langid = "0.9"
 dioxus = { version = "0.7", features = ["desktop"] }
 futures-timer = "3"
 memmap2 = "0.9"
+rayon = "1"
 rfd = "0.17"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

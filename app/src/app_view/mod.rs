@@ -3,6 +3,8 @@ use dioxus::prelude::*;
 use rton_editor_core::{BinaryEncoding, EncodeOptions, TextFormat};
 
 use crate::app_actions::*;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::app_constants::{DESKTOP_WINDOW_MIN_HEIGHT, DESKTOP_WINDOW_MIN_WIDTH};
 use crate::app_i18n::*;
 use crate::app_layout::StatusBar;
 use crate::components::{
@@ -107,6 +109,8 @@ pub(crate) fn App() -> Element {
     let active_id_snapshot = *active_tab_id.read();
     let rton_output_size = use_signal(|| None::<RtonOutputSize>);
     let rton_output_size_generation = use_signal(|| 0_u64);
+    #[cfg(not(target_arch = "wasm32"))]
+    let last_window_size_save = use_signal(|| None::<(u32, u32)>);
     let (
         active_tab_snapshot,
         active_stage_tab_snapshot,
@@ -569,6 +573,22 @@ pub(crate) fn App() -> Element {
         style { {APP_CSS} }
         main {
             class: theme_preference_snapshot.shell_class(),
+            onresize: move |event| {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if let Ok(size) = event.get_content_box_size() {
+                        save_desktop_viewport_size(
+                            size.width,
+                            size.height,
+                            last_window_size_save,
+                        );
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = event;
+                }
+            },
             onmouseup: handle_workspace_mouse_up,
             ToolbarView {
                 i18n,
@@ -756,6 +776,29 @@ pub(crate) fn App() -> Element {
                 status: status_snapshot
             }
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_desktop_viewport_size(width: f64, height: f64, mut last_saved: Signal<Option<(u32, u32)>>) {
+    if !width.is_finite() || !height.is_finite() {
+        return;
+    }
+
+    let width = width.round().max(0.0) as u32;
+    let height = height.round().max(0.0) as u32;
+    if width < DESKTOP_WINDOW_MIN_WIDTH || height < DESKTOP_WINDOW_MIN_HEIGHT {
+        return;
+    }
+
+    let next_size = (width, height);
+    if *last_saved.peek() == Some(next_size) {
+        return;
+    }
+    last_saved.set(Some(next_size));
+
+    if let Err(error) = crate::platform::save_window_size_preference(width, height) {
+        eprintln!("failed to save window size preference: {error}");
     }
 }
 

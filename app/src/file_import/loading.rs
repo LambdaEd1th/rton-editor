@@ -1,6 +1,6 @@
 use dioxus_html::FileData;
 #[cfg(not(target_arch = "wasm32"))]
-use rton_editor_core::{DecodedDocument, parse_text};
+use rton_editor_core::{DecodedDocument, decode_rton_reader, parse_text};
 use rton_editor_core::{SourceFormat, TextFormat};
 #[cfg(target_arch = "wasm32")]
 use rton_editor_core::{WorkerOpenTextRequest, WorkerOpenTextResponse, WorkerSurface};
@@ -114,6 +114,51 @@ fn create_tab_from_loaded_file_sync(
             create_tab_from_loaded_bytes_sync(id, file.display_name.clone(), bytes.as_ref())
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn document_from_loaded_file_sync(
+    file: &LoadedFileState,
+) -> Result<Arc<DecodedDocument>, OpenTabError> {
+    match &file.source {
+        LoadedFileSource::NativePath(path) => {
+            document_from_file_path(&file.display_name, path).map(Arc::new)
+        }
+        LoadedFileSource::Bytes(bytes) => {
+            document_from_loaded_bytes_sync(&file.display_name, bytes.as_ref()).map(Arc::new)
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn document_from_file_path(
+    display_name: &str,
+    path: &Path,
+) -> Result<DecodedDocument, OpenTabError> {
+    let byte_doc = ByteDocument::from_file_path(path).map_err(OpenTabError::Read)?;
+    if let Some(format) = text_format_for_file_name(display_name) {
+        let bytes = byte_doc.as_cow();
+        let text = String::from_utf8_lossy(bytes.as_ref());
+        return parse_text(text.as_ref(), format)
+            .map_err(|error| OpenTabError::Decode(error.to_string()));
+    }
+
+    decode_rton_reader(byte_doc.reader()).map_err(|error| OpenTabError::Decode(error.to_string()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn document_from_loaded_bytes_sync(
+    display_name: &str,
+    bytes: &[u8],
+) -> Result<DecodedDocument, OpenTabError> {
+    if let Some(format) = text_format_for_file_name(display_name) {
+        let text = String::from_utf8_lossy(bytes);
+        return parse_text(text.as_ref(), format)
+            .map_err(|error| OpenTabError::Decode(error.to_string()));
+    }
+
+    decode_rton_reader(std::io::Cursor::new(bytes))
+        .map_err(|error| OpenTabError::Decode(error.to_string()))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
