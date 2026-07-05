@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::domain::text_surface_from_text;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::domain::value_tree_rows_for_doc;
 use crate::domain::{
     ByteDocument, EditorTabState, OpenTabError, create_tab_from_byte_document,
@@ -17,6 +15,8 @@ use crate::domain::{
 };
 #[cfg(target_arch = "wasm32")]
 use crate::domain::{TextBuffer, TextContentState};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::domain::{text_line_offsets, text_surface_from_arc_parts};
 use crate::platform;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::platform::run_cpu_task;
@@ -27,6 +27,35 @@ use super::state::{LoadedFileDraft, LoadedFileSource, LoadedFileState};
 
 pub(crate) fn loaded_file_draft_from_native(file: platform::NativeOpenFile) -> LoadedFileDraft {
     loaded_file_draft_from_native_path(file.display_name, file.path)
+}
+
+pub(crate) fn loaded_file_drafts_from_native(
+    files: Vec<platform::NativeOpenFile>,
+) -> Vec<LoadedFileDraft> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if files.len() < 512 {
+        return files
+            .into_iter()
+            .map(loaded_file_draft_from_native)
+            .collect();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        files
+            .into_par_iter()
+            .map(loaded_file_draft_from_native)
+            .collect()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        files
+            .into_iter()
+            .map(loaded_file_draft_from_native)
+            .collect()
+    }
 }
 
 fn loaded_file_draft_from_native_path(display_name: String, path: PathBuf) -> LoadedFileDraft {
@@ -169,14 +198,11 @@ fn create_tab_from_loaded_bytes_sync(
 ) -> Result<EditorTabState, OpenTabError> {
     if let Some(format) = text_format_for_file_name(&display_name) {
         let text = String::from_utf8_lossy(bytes).to_string();
-        let doc = parse_text(&text, format).ok();
-        let surface = text_surface_from_text(text, format);
-        return Ok(text_tab_with_optional_document(
+        return Ok(create_text_tab_from_text_parallel(
             id,
             display_name,
-            surface,
+            text,
             format,
-            doc,
         ));
     }
 
@@ -214,11 +240,7 @@ fn create_tab_from_file_path(
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(format) = text_format_for_file_name(&name) {
         let text = String::from_utf8_lossy(byte_doc.as_cow().as_ref()).to_string();
-        let doc = parse_text(&text, format).ok();
-        let surface = text_surface_from_text(text, format);
-        return Ok(text_tab_with_optional_document(
-            id, name, surface, format, doc,
-        ));
+        return Ok(create_text_tab_from_text_parallel(id, name, text, format));
     }
 
     create_tab_from_byte_document(id, name, byte_doc)
@@ -232,6 +254,33 @@ fn text_format_for_file_name(file_name: &str) -> Option<TextFormat> {
         SourceFormat::Toml => Some(TextFormat::Toml),
         SourceFormat::Rton | SourceFormat::Unknown => None,
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn create_text_tab_from_text_parallel(
+    id: usize,
+    display_name: String,
+    text: String,
+    format: TextFormat,
+) -> EditorTabState {
+    let text = Arc::<str>::from(text);
+    let (surface, doc) = std::thread::scope(|scope| {
+        let offsets_text = text.clone();
+        let line_offsets = scope.spawn(move || text_line_offsets(offsets_text.as_ref()));
+        let parse_text_source = text.clone();
+        let doc = scope.spawn(move || parse_text(parse_text_source.as_ref(), format).ok());
+        (
+            text_surface_from_arc_parts(
+                text,
+                line_offsets
+                    .join()
+                    .expect("text line offsets task panicked"),
+                format,
+            ),
+            doc.join().expect("text parse task panicked"),
+        )
+    });
+    text_tab_with_optional_document(id, display_name, surface, format, doc)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

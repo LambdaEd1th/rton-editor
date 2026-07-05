@@ -1,20 +1,34 @@
 use serde::{Deserialize, Serialize};
 use serde_rton::Value;
 
+use crate::BinaryEncoding;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DecodedDocument {
     pub value: Value,
     pub encrypted_source: bool,
+    #[serde(default)]
+    pub encoding_source: BinaryEncoding,
     pub byte_len: Option<usize>,
     pub stats: ValueStats,
 }
 
 impl DecodedDocument {
     pub fn new(value: Value, encrypted_source: bool, byte_len: Option<usize>) -> Self {
+        Self::new_with_source_encoding(value, encrypted_source, BinaryEncoding::Standard, byte_len)
+    }
+
+    pub fn new_with_source_encoding(
+        value: Value,
+        encrypted_source: bool,
+        encoding_source: BinaryEncoding,
+        byte_len: Option<usize>,
+    ) -> Self {
         let stats = ValueStats::from_value(&value);
         Self {
             value,
             encrypted_source,
+            encoding_source,
             byte_len,
             stats,
         }

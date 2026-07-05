@@ -43,6 +43,42 @@ fn caps_text_search_results_for_display() {
 }
 
 #[test]
+fn searches_large_text_with_parallel_ascii_case_fold() {
+    let mut text = "x".repeat(700_000);
+    let mut expected = Vec::new();
+    for offset in (128..700_000).step_by(4096) {
+        text.replace_range(offset..offset + 4, "RtOn");
+        expected.push(TextSearchMatch {
+            start: offset,
+            end: offset + 4,
+        });
+    }
+
+    let result = find_text_search_result(&text, "rton", false);
+
+    assert_eq!(result.matches, expected);
+    assert!(!result.capped);
+}
+
+#[test]
+fn searches_large_text_with_parallel_case_sensitive_ascii() {
+    let mut text = "x".repeat(700_000);
+    let mut expected = Vec::new();
+    for offset in (256..700_000).step_by(8192) {
+        text.replace_range(offset..offset + 4, "RTON");
+        expected.push(TextSearchMatch {
+            start: offset,
+            end: offset + 4,
+        });
+    }
+
+    let result = find_text_search_result(&text, "RTON", true);
+
+    assert_eq!(result.matches, expected);
+    assert!(!result.capped);
+}
+
+#[test]
 fn replaces_hex_byte_spans() {
     let bytes = [0x52, 0x54, 0x4f, 0x4e];
 
@@ -176,6 +212,31 @@ fn searches_hex_and_ascii_patterns() {
     assert_eq!(find_hex_search_matches(&bytes, &hex.bytes, false).len(), 1);
     assert!(ascii.valid);
     assert_eq!(find_hex_search_matches(&bytes, &ascii.bytes, true).len(), 2);
+}
+
+#[test]
+fn searches_and_replaces_large_hex_with_parallel_chunks() {
+    let mut bytes = vec![0u8; 700_000];
+    let mut expected_matches = Vec::new();
+    for offset in (64..700_000 - 2).step_by(4096) {
+        bytes[offset] = 0xaa;
+        bytes[offset + 1] = 0xbb;
+        expected_matches.push(HexSearchMatch { offset, length: 2 });
+    }
+    let byte_doc = ByteDocument::from_vec(bytes.clone());
+
+    let result = find_hex_search_result(&byte_doc, &[0xaa, 0xbb], false);
+    let edits = replace_all_byte_edits(&byte_doc, &[0xaa, 0xbb], &[0xcc, 0xdd], false)
+        .expect("parallel edits");
+
+    assert_eq!(result.matches, expected_matches);
+    assert!(!result.capped);
+    assert_eq!(edits.len(), expected_matches.len());
+    assert_eq!(edits.first().map(|edit| edit.offset), Some(64));
+    assert_eq!(
+        edits.last().map(|edit| edit.insert.as_slice()),
+        Some(&[0xcc, 0xdd][..])
+    );
 }
 
 #[test]

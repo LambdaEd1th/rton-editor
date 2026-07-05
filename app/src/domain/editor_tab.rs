@@ -1,10 +1,11 @@
 use rton_editor_core::{
-    CoreError, DecodedDocument, ENCRYPTED_RTON_PREFIX, SourceFormat, TextFormat, TreeRows,
-    ValueSearchResult, decode_hex_rton, decode_rton_reader, decrypt_rton_bytes_if_needed,
-    flatten_expanded_value_tree, parse_text, search_value_tree,
+    BinaryEncoding, CoreError, DecodedDocument, ENCRYPTED_RTON_PREFIX, EncodeOptions, SourceFormat,
+    TextFormat, TreeRows, ValueSearchResult, decode_hex_rton, decode_rton_reader,
+    decrypt_rton_bytes_if_needed, detect_rton_binary_encoding, flatten_expanded_value_tree,
+    parse_text, search_value_tree,
 };
 #[cfg(any(not(target_arch = "wasm32"), test))]
-use rton_editor_core::{EncodeOptions, encode_rton_bytes, value_to_text};
+use rton_editor_core::{encode_rton_bytes, value_to_text};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -16,6 +17,7 @@ pub(crate) struct EditorTabState {
     pub(crate) file_name: String,
     pub(crate) doc: Option<Arc<DecodedDocument>>,
     pub(crate) byte_doc: Option<ByteDocument>,
+    pub(crate) source_encode_options: EncodeOptions,
     pub(crate) tree_rows: Arc<TreeRows>,
     pub(crate) search_result: Option<Arc<ValueSearchResult>>,
     pub(crate) editor_text: Arc<str>,
@@ -69,8 +71,12 @@ impl TextBuffer {
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn from_parts(text: String, line_offsets: Vec<usize>) -> Self {
+        Self::from_arc_parts(Arc::from(text), line_offsets)
+    }
+
+    pub(crate) fn from_arc_parts(text: Arc<str>, line_offsets: Vec<usize>) -> Self {
         Self {
-            text: Arc::from(text),
+            text,
             line_offsets: Arc::from(line_offsets),
         }
     }
@@ -133,12 +139,13 @@ pub(crate) fn create_tab_from_byte_document(
 ) -> Result<EditorTabState, CoreError> {
     match SourceFormat::from_file_name(&name) {
         SourceFormat::Rton | SourceFormat::Unknown => {
-            let byte_doc = rton_hex_byte_document_for_display(byte_doc);
+            let display_source = rton_hex_byte_document_for_display(byte_doc);
             Ok(EditorTabState {
                 id,
                 file_name: name,
                 doc: None,
-                byte_doc: Some(byte_doc),
+                byte_doc: Some(display_source.byte_doc),
+                source_encode_options: display_source.encode_options,
                 tree_rows: empty_tree_rows(),
                 search_result: None,
                 editor_text: empty_editor_text(),
@@ -179,13 +186,25 @@ pub(crate) fn create_tab_from_byte_document(
     }
 }
 
-fn rton_hex_byte_document_for_display(byte_doc: ByteDocument) -> ByteDocument {
+struct RtonDisplaySource {
+    byte_doc: ByteDocument,
+    encode_options: EncodeOptions,
+}
+
+fn rton_hex_byte_document_for_display(byte_doc: ByteDocument) -> RtonDisplaySource {
+    let source_encoding = rton_binary_encoding_from_byte_document(&byte_doc);
     let encrypted = ENCRYPTED_RTON_PREFIX
         .iter()
         .enumerate()
         .all(|(index, byte)| byte_doc.byte_at(index) == Some(*byte));
     if !encrypted {
-        return byte_doc;
+        return RtonDisplaySource {
+            byte_doc,
+            encode_options: EncodeOptions {
+                encoding: source_encoding,
+                encrypted: false,
+            },
+        };
     }
 
     let decrypted = {
@@ -194,8 +213,32 @@ fn rton_hex_byte_document_for_display(byte_doc: ByteDocument) -> ByteDocument {
     };
 
     match decrypted {
-        Ok(Some(bytes)) => ByteDocument::from_vec(bytes),
-        Ok(None) | Err(_) => byte_doc,
+        Ok(Some(bytes)) => {
+            let encoding = detect_rton_binary_encoding(&bytes);
+            RtonDisplaySource {
+                byte_doc: ByteDocument::from_vec(bytes),
+                encode_options: EncodeOptions {
+                    encoding,
+                    encrypted: true,
+                },
+            }
+        }
+        Ok(None) | Err(_) => RtonDisplaySource {
+            byte_doc,
+            encode_options: EncodeOptions {
+                encoding: BinaryEncoding::Standard,
+                encrypted: true,
+            },
+        },
+    }
+}
+
+fn rton_binary_encoding_from_byte_document(byte_doc: &ByteDocument) -> BinaryEncoding {
+    let mut header = [0_u8; 8];
+    if byte_doc.copy_range_to(0, &mut header) == Some(header.len()) {
+        detect_rton_binary_encoding(&header)
+    } else {
+        BinaryEncoding::Standard
     }
 }
 
@@ -226,6 +269,7 @@ pub(crate) fn create_text_tab_from_surface(
         tree_rows: empty_tree_rows(),
         doc: None,
         byte_doc: surface.byte_doc,
+        source_encode_options: EncodeOptions::default(),
         search_result: None,
         editor_text: surface.editor_text,
         text_buffer: surface.text_buffer,
@@ -366,6 +410,20 @@ pub(crate) fn text_surface_for_document(
 
 pub(crate) fn text_surface_from_text(editor_text: String, format: TextFormat) -> TabSurface {
     let text_buffer = Arc::new(TextBuffer::new(editor_text));
+    text_surface_from_buffer(text_buffer, format)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn text_surface_from_arc_parts(
+    editor_text: Arc<str>,
+    line_offsets: Vec<usize>,
+    format: TextFormat,
+) -> TabSurface {
+    let text_buffer = Arc::new(TextBuffer::from_arc_parts(editor_text, line_offsets));
+    text_surface_from_buffer(text_buffer, format)
+}
+
+fn text_surface_from_buffer(text_buffer: Arc<TextBuffer>, format: TextFormat) -> TabSurface {
     let editor_text = text_buffer.text.clone();
     let byte_count = text_buffer.byte_count();
     let line_count = text_buffer.line_count();
@@ -381,7 +439,7 @@ pub(crate) fn text_surface_from_text(editor_text: String, format: TextFormat) ->
     }
 }
 
-fn text_line_offsets(text: &str) -> Vec<usize> {
+pub(crate) fn text_line_offsets(text: &str) -> Vec<usize> {
     if text.is_empty() {
         return Vec::new();
     }

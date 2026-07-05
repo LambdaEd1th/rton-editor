@@ -23,7 +23,8 @@ pub use error::{CoreError, Result};
 pub use formats::{BinaryEncoding, EncodeOptions, SourceFormat, TextFormat};
 pub use rton::{
     ENCRYPTED_RTON_PREFIX, bytes_to_hex, decode_hex_rton, decode_rton_bytes, decode_rton_reader,
-    decrypt_rton_bytes_if_needed, encode_rton_bytes, format_bytes, hex_to_bytes,
+    decrypt_rton_bytes_if_needed, detect_rton_binary_encoding, encode_rton_bytes, format_bytes,
+    hex_to_bytes,
 };
 pub use rton_inspector::{
     RtonAsciiRun, RtonPayloadInfo, RtonStringInfo, RtonStringMode, RtonStringTables, RtonTagInfo,

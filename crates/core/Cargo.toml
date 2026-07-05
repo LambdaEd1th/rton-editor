@@ -14,3 +14,6 @@ serde_rton = { git = "https://github.com/LambdaEd1th/serde_rton.git", tag = "v0.
 serde_yaml = "0.9.33"
 thiserror = "2.0"
 toml = "1.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1"

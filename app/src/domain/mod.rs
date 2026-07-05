@@ -36,6 +36,8 @@ pub(crate) use editor_tab::{
     text_surface_from_text, value_search_result_for_doc, value_tree_rows_for_doc,
     value_tree_rows_for_doc_with_expansion,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use editor_tab::{text_line_offsets, text_surface_from_arc_parts};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use file_paths::normalize_display_path;
 pub(crate) use file_paths::{

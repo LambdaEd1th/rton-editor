@@ -57,6 +57,7 @@ fn tab(id: usize) -> EditorTabState {
         file_name: format!("sample-{id}.json"),
         doc: None,
         byte_doc: None,
+        source_encode_options: EncodeOptions::default(),
         tree_rows: empty_tree_rows(),
         search_result: None,
         editor_text: empty_editor_text(),

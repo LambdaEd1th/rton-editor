@@ -3,6 +3,10 @@ use crate::domain::byte_document::ByteRead;
 use crate::i18n::I18n;
 
 pub(crate) const HEX_SEARCH_MATCH_DISPLAY_LIMIT: usize = 5000;
+#[cfg(not(target_arch = "wasm32"))]
+const PARALLEL_HEX_SEARCH_MIN_BYTES: usize = 512 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const PARALLEL_HEX_REPLACE_MIN_BYTES: usize = 512 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HexSearchMode {
@@ -121,7 +125,7 @@ pub(crate) fn parse_ascii_pattern(text: &str, allow_empty: bool, i18n: I18n) -> 
 }
 
 #[cfg(test)]
-pub(crate) fn find_hex_search_matches<B: ByteRead + ?Sized>(
+pub(crate) fn find_hex_search_matches<B: ByteRead + Sync + ?Sized>(
     bytes: &B,
     pattern: &[u8],
     ascii_insensitive: bool,
@@ -129,7 +133,7 @@ pub(crate) fn find_hex_search_matches<B: ByteRead + ?Sized>(
     find_hex_search_result(bytes, pattern, ascii_insensitive).matches
 }
 
-pub(crate) fn find_hex_search_result<B: ByteRead + ?Sized>(
+pub(crate) fn find_hex_search_result<B: ByteRead + Sync + ?Sized>(
     bytes: &B,
     pattern: &[u8],
     ascii_insensitive: bool,
@@ -140,6 +144,20 @@ pub(crate) fn find_hex_search_result<B: ByteRead + ?Sized>(
             capped: false,
         };
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if bytes.len() >= PARALLEL_HEX_SEARCH_MIN_BYTES {
+        return find_hex_search_result_parallel(bytes, pattern, ascii_insensitive);
+    }
+
+    find_hex_search_result_sequential(bytes, pattern, ascii_insensitive)
+}
+
+fn find_hex_search_result_sequential<B: ByteRead + ?Sized>(
+    bytes: &B,
+    pattern: &[u8],
+    ascii_insensitive: bool,
+) -> HexSearchResult {
     let mut matches = Vec::new();
     let mut offset = 0;
     let mut capped = false;
@@ -159,6 +177,99 @@ pub(crate) fn find_hex_search_result<B: ByteRead + ?Sized>(
         }
     }
     HexSearchResult { matches, capped }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn find_hex_search_result_parallel<B: ByteRead + Sync + ?Sized>(
+    bytes: &B,
+    pattern: &[u8],
+    ascii_insensitive: bool,
+) -> HexSearchResult {
+    use rayon::prelude::*;
+
+    let max_start = bytes.len() - pattern.len();
+    let chunk_count = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(2)
+        .max(1);
+    let chunk_size = (max_start + 1).div_ceil(chunk_count).max(1);
+    let mut chunk_results = (0..=max_start)
+        .step_by(chunk_size)
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|start| {
+            let end = (start + chunk_size).min(max_start + 1);
+            collect_hex_matches_in_start_range(bytes, pattern, ascii_insensitive, start, end)
+        })
+        .collect::<Vec<_>>();
+
+    let mut raw_matches = Vec::new();
+    let mut capped = false;
+    chunk_results.sort_by_key(|result| result.start);
+    for result in chunk_results {
+        capped |= result.capped;
+        raw_matches.extend(result.matches);
+    }
+    raw_matches.sort_by_key(|match_| match_.offset);
+
+    let mut matches = Vec::new();
+    let mut next_allowed = 0usize;
+    for match_ in raw_matches {
+        if match_.offset < next_allowed {
+            continue;
+        }
+        next_allowed = match_.offset.saturating_add(match_.length);
+        matches.push(match_);
+        if matches.len() >= HEX_SEARCH_MATCH_DISPLAY_LIMIT {
+            capped = next_allowed < bytes.len();
+            break;
+        }
+    }
+    if matches.len() > HEX_SEARCH_MATCH_DISPLAY_LIMIT {
+        matches.truncate(HEX_SEARCH_MATCH_DISPLAY_LIMIT);
+        capped = true;
+    }
+    HexSearchResult { matches, capped }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct HexSearchChunkResult {
+    start: usize,
+    matches: Vec<HexSearchMatch>,
+    capped: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn collect_hex_matches_in_start_range<B: ByteRead + ?Sized>(
+    bytes: &B,
+    pattern: &[u8],
+    ascii_insensitive: bool,
+    start: usize,
+    end: usize,
+) -> HexSearchChunkResult {
+    let mut matches = Vec::new();
+    let mut offset = start;
+    let mut capped = false;
+    while offset < end {
+        if matches_at(bytes, offset, pattern, ascii_insensitive) {
+            matches.push(HexSearchMatch {
+                offset,
+                length: pattern.len(),
+            });
+            if matches.len() >= HEX_SEARCH_MATCH_DISPLAY_LIMIT {
+                capped = offset + pattern.len() < bytes.len();
+                break;
+            }
+            offset += pattern.len().max(1);
+        } else {
+            offset += 1;
+        }
+    }
+    HexSearchChunkResult {
+        start,
+        matches,
+        capped,
+    }
 }
 
 fn matches_at<B: ByteRead + ?Sized>(
@@ -256,7 +367,7 @@ pub(crate) fn hex_search_status_text(
     }
 }
 
-pub(crate) fn replace_all_byte_edits<B: ByteRead + ?Sized>(
+pub(crate) fn replace_all_byte_edits<B: ByteRead + Sync + ?Sized>(
     bytes: &B,
     pattern: &[u8],
     replacement: &[u8],
@@ -265,6 +376,21 @@ pub(crate) fn replace_all_byte_edits<B: ByteRead + ?Sized>(
     if pattern.is_empty() || bytes.len() < pattern.len() {
         return None;
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if bytes.len() >= PARALLEL_HEX_REPLACE_MIN_BYTES {
+        return replace_all_byte_edits_parallel(bytes, pattern, replacement, ascii_insensitive);
+    }
+
+    replace_all_byte_edits_sequential(bytes, pattern, replacement, ascii_insensitive)
+}
+
+fn replace_all_byte_edits_sequential<B: ByteRead + ?Sized>(
+    bytes: &B,
+    pattern: &[u8],
+    replacement: &[u8],
+    ascii_insensitive: bool,
+) -> Option<Vec<HexEdit>> {
     let mut offset = 0;
     let mut offset_delta = 0_i128;
     let mut edits = Vec::new();
@@ -283,6 +409,54 @@ pub(crate) fn replace_all_byte_edits<B: ByteRead + ?Sized>(
             offset += pattern.len();
         } else {
             offset += 1;
+        }
+    }
+    (!edits.is_empty()).then_some(edits)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn replace_all_byte_edits_parallel<B: ByteRead + Sync + ?Sized>(
+    bytes: &B,
+    pattern: &[u8],
+    replacement: &[u8],
+    ascii_insensitive: bool,
+) -> Option<Vec<HexEdit>> {
+    use rayon::prelude::*;
+
+    let max_start = bytes.len() - pattern.len();
+    let chunk_count = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(2)
+        .max(1);
+    let chunk_size = (max_start + 1).div_ceil(chunk_count).max(1);
+    let mut offsets = (0..=max_start)
+        .step_by(chunk_size)
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .flat_map(|start| {
+            let end = (start + chunk_size).min(max_start + 1);
+            (start..end)
+                .filter(|offset| matches_at(bytes, *offset, pattern, ascii_insensitive))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    offsets.sort_unstable();
+    let mut offset_delta = 0_i128;
+    let mut next_allowed = 0usize;
+    let mut edits = Vec::new();
+    for offset in offsets {
+        if offset < next_allowed {
+            continue;
+        }
+        next_allowed = offset.saturating_add(pattern.len());
+        if replacement_changes_bytes(bytes, offset, pattern.len(), replacement) {
+            edits.push(HexEdit {
+                offset: offset_with_delta(offset, offset_delta),
+                delete_length: pattern.len(),
+                insert: replacement.to_vec(),
+            });
+            offset_delta += replacement.len() as i128 - pattern.len() as i128;
         }
     }
     (!edits.is_empty()).then_some(edits)

@@ -302,6 +302,8 @@ pub(crate) fn App() -> Element {
             next_tab_id,
             tabs,
             active_tab_id,
+            compact_output,
+            encrypt_output,
             status,
             i18n,
         );

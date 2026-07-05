@@ -56,6 +56,12 @@ pub enum BinaryEncoding {
     Compact,
 }
 
+impl Default for BinaryEncoding {
+    fn default() -> Self {
+        Self::Standard
+    }
+}
+
 impl BinaryEncoding {
     pub fn label(self) -> &'static str {
         match self {

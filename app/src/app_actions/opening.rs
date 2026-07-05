@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
 
-use rton_editor_core::TextFormat;
+use rton_editor_core::{BinaryEncoding, TextFormat};
 
 use crate::app_sample::SAMPLE_JSON;
 use crate::components::FileSelection;
 use crate::domain::{EditorTabState, OpenTabError, Status, Tone, create_text_tab};
 use crate::file_import::{
-    LoadedFileState, create_tab_from_loaded_file, loaded_file_draft_from_native,
+    LoadedFileState, create_tab_from_loaded_file, loaded_file_drafts_from_native,
     stage_loaded_file_drafts,
 };
 use crate::i18n::I18n;
@@ -62,6 +62,8 @@ pub(crate) fn open_loaded_file_by_id(
     mut next_tab_id: Signal<usize>,
     mut tabs: Signal<Vec<EditorTabState>>,
     mut active_tab_id: Signal<usize>,
+    compact_output: Signal<bool>,
+    encrypt_output: Signal<bool>,
     mut status: Signal<Status>,
     i18n: I18n,
 ) {
@@ -79,6 +81,9 @@ pub(crate) fn open_loaded_file_by_id(
             && tabs.read().iter().any(|tab| tab.id == tab_id)
         {
             active_tab_id.set(tab_id);
+            if let Some(tab) = tabs.read().iter().find(|tab| tab.id == tab_id) {
+                sync_output_encoding_from_tab(tab, compact_output, encrypt_output);
+            }
             status.set(Status::new(i18n.t("status-tab-activated"), Tone::Info));
             return;
         }
@@ -88,9 +93,11 @@ pub(crate) fn open_loaded_file_by_id(
         let name = entry.display_name.clone();
         match create_tab_from_loaded_file(id, &entry).await {
             Ok(tab) => {
+                let source_options = tab.source_encode_options;
                 tabs.write().push(tab);
                 crate::file_import::set_loaded_file_tab_id(loaded_files, file_id, Some(id));
                 active_tab_id.set(id);
+                sync_output_encoding_from_options(source_options, compact_output, encrypt_output);
                 status.set(Status::new(
                     i18n.t_args("status-opened-file", &[("name", name)]),
                     Tone::Ok,
@@ -113,6 +120,23 @@ pub(crate) fn open_loaded_file_by_id(
             )),
         }
     });
+}
+
+fn sync_output_encoding_from_tab(
+    tab: &EditorTabState,
+    compact_output: Signal<bool>,
+    encrypt_output: Signal<bool>,
+) {
+    sync_output_encoding_from_options(tab.source_encode_options, compact_output, encrypt_output);
+}
+
+fn sync_output_encoding_from_options(
+    options: rton_editor_core::EncodeOptions,
+    mut compact_output: Signal<bool>,
+    mut encrypt_output: Signal<bool>,
+) {
+    compact_output.set(options.encoding == BinaryEncoding::Compact);
+    encrypt_output.set(options.encrypted);
 }
 
 pub(crate) fn open_native_files_dialog(
@@ -170,10 +194,7 @@ fn stage_native_open_files(
         return;
     }
 
-    let drafts = files
-        .into_iter()
-        .map(loaded_file_draft_from_native)
-        .collect();
+    let drafts = loaded_file_drafts_from_native(files);
     let indexed =
         stage_loaded_file_drafts(loaded_files, next_loaded_file_id, file_selection, drafts);
     status.set(Status::new(

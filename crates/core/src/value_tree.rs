@@ -58,6 +58,12 @@ pub fn flatten_expanded_value_tree(
     expanded_paths: &HashSet<String>,
     limit: usize,
 ) -> TreeRows {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(rows) = flatten_expanded_value_tree_parallel_top_level(value, expanded_paths, limit)
+    {
+        return rows;
+    }
+
     let mut context = ExpandedFlattenContext {
         expanded_paths,
         limit,
@@ -69,6 +75,80 @@ pub fn flatten_expanded_value_tree(
         rows: context.rows,
         truncated: context.truncated,
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn flatten_expanded_value_tree_parallel_top_level(
+    value: &Value,
+    expanded_paths: &HashSet<String>,
+    limit: usize,
+) -> Option<TreeRows> {
+    use rayon::prelude::*;
+
+    const PARALLEL_TREE_MIN_CHILDREN: usize = 512;
+
+    if limit != usize::MAX || !expanded_paths.contains("$") {
+        return None;
+    }
+
+    let root = ValueRow {
+        path: "$".to_string(),
+        label: "root".to_string(),
+        kind: value_kind(value).to_string(),
+        preview: value_preview(value),
+        depth: 0,
+        child_count: value_child_count(value),
+    };
+
+    let parts = match value {
+        Value::Array(items) if items.len() >= PARALLEL_TREE_MIN_CHILDREN => items
+            .par_iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let child_path = format!("$[{index}]");
+                let child_label = format!("[{index}]");
+                let mut context = ExpandedFlattenContext {
+                    expanded_paths,
+                    limit: usize::MAX,
+                    rows: Vec::new(),
+                    truncated: false,
+                };
+                context.visit(item, &child_path, &child_label, 1);
+                context.rows
+            })
+            .collect::<Vec<_>>(),
+        Value::Object(entries) if entries.len() >= PARALLEL_TREE_MIN_CHILDREN => entries
+            .par_iter()
+            .enumerate()
+            .map(|(index, (key, item))| {
+                let child_path = format!("$.{}#{index}", escape_path_key(key));
+                let mut context = ExpandedFlattenContext {
+                    expanded_paths,
+                    limit: usize::MAX,
+                    rows: Vec::new(),
+                    truncated: false,
+                };
+                context.visit(item, &child_path, key, 1);
+                context.rows
+            })
+            .collect::<Vec<_>>(),
+        _ => return None,
+    };
+
+    let mut rows = Vec::with_capacity(
+        1 + parts
+            .iter()
+            .map(Vec::len)
+            .fold(0usize, usize::saturating_add),
+    );
+    rows.push(root);
+    for part in parts {
+        rows.extend(part);
+    }
+    Some(TreeRows {
+        rows,
+        truncated: false,
+    })
 }
 
 pub fn search_value_tree(value: &Value, query: &str, limit: usize) -> ValueSearchResult {

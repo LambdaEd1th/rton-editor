@@ -1,6 +1,9 @@
 use crate::app_constants::TEXT_SEARCH_MATCH_DISPLAY_LIMIT;
 use crate::i18n::I18n;
 
+#[cfg(not(target_arch = "wasm32"))]
+const PARALLEL_TEXT_SEARCH_MIN_BYTES: usize = 512 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TextSearchMatch {
     pub(crate) start: usize,
@@ -25,10 +28,26 @@ pub(crate) fn find_text_search_result(
         };
     }
 
-    if case_sensitive {
+    if case_sensitive && should_parallelize_ascii_text_search(text, query) {
+        collect_ascii_case_sensitive_text_search_matches_parallel(text, query)
+    } else if case_sensitive {
         collect_text_search_matches(text, query)
+    } else if should_parallelize_ascii_text_search(text, query) {
+        collect_ascii_case_insensitive_text_search_matches_parallel(text, query)
     } else {
         collect_ascii_case_insensitive_text_search_matches(text, query)
+    }
+}
+
+fn should_parallelize_ascii_text_search(text: &str, query: &str) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        text.len() >= PARALLEL_TEXT_SEARCH_MIN_BYTES && query.is_ascii()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (text, query);
+        false
     }
 }
 
@@ -83,6 +102,215 @@ fn collect_ascii_case_insensitive_text_search_matches(
     TextSearchResult { matches, capped }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn collect_ascii_case_sensitive_text_search_matches_parallel(
+    haystack: &str,
+    needle: &str,
+) -> TextSearchResult {
+    use rayon::prelude::*;
+
+    let haystack_bytes = haystack.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let max_start = haystack_bytes.len() - needle_bytes.len();
+    let chunk_count = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(2)
+        .max(1);
+    let chunk_size = (max_start + 1).div_ceil(chunk_count).max(1);
+    let mut chunks = (0..=max_start)
+        .step_by(chunk_size)
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|start| {
+            let end = (start + chunk_size).min(max_start + 1);
+            collect_ascii_case_sensitive_text_search_chunk(
+                haystack,
+                haystack_bytes,
+                needle_bytes,
+                start,
+                end,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    chunks.sort_by_key(|chunk| chunk.start);
+    finalize_parallel_text_search_chunks(chunks, haystack.len())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn collect_ascii_case_sensitive_text_search_matches_parallel(
+    haystack: &str,
+    needle: &str,
+) -> TextSearchResult {
+    collect_text_search_matches(haystack, needle)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn collect_ascii_case_insensitive_text_search_matches_parallel(
+    haystack: &str,
+    needle: &str,
+) -> TextSearchResult {
+    use rayon::prelude::*;
+
+    let haystack_bytes = haystack.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let max_start = haystack_bytes.len() - needle_bytes.len();
+    let chunk_count = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(2)
+        .max(1);
+    let chunk_size = (max_start + 1).div_ceil(chunk_count).max(1);
+    let mut chunks = (0..=max_start)
+        .step_by(chunk_size)
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|start| {
+            let end = (start + chunk_size).min(max_start + 1);
+            collect_ascii_case_insensitive_text_search_chunk(
+                haystack,
+                haystack_bytes,
+                needle_bytes,
+                start,
+                end,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    chunks.sort_by_key(|chunk| chunk.start);
+    finalize_parallel_text_search_chunks(chunks, haystack.len())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn collect_ascii_case_insensitive_text_search_matches_parallel(
+    haystack: &str,
+    needle: &str,
+) -> TextSearchResult {
+    collect_ascii_case_insensitive_text_search_matches(haystack, needle)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn finalize_parallel_text_search_chunks(
+    chunks: Vec<TextSearchChunkResult>,
+    haystack_len: usize,
+) -> TextSearchResult {
+    let mut raw_matches = Vec::new();
+    let mut capped = false;
+    for chunk in chunks {
+        capped |= chunk.capped;
+        raw_matches.extend(chunk.matches);
+    }
+    raw_matches.sort_by_key(|match_| match_.start);
+    let mut matches = Vec::new();
+    let mut next_allowed = 0usize;
+    for match_ in raw_matches {
+        if match_.start < next_allowed {
+            continue;
+        }
+        next_allowed = match_.end;
+        matches.push(match_);
+        if matches.len() >= TEXT_SEARCH_MATCH_DISPLAY_LIMIT {
+            capped = next_allowed < haystack_len;
+            break;
+        }
+    }
+    if matches.len() > TEXT_SEARCH_MATCH_DISPLAY_LIMIT {
+        matches.truncate(TEXT_SEARCH_MATCH_DISPLAY_LIMIT);
+        capped = true;
+    }
+    TextSearchResult { matches, capped }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct TextSearchChunkResult {
+    start: usize,
+    matches: Vec<TextSearchMatch>,
+    capped: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn collect_ascii_case_sensitive_text_search_chunk(
+    haystack: &str,
+    haystack_bytes: &[u8],
+    needle_bytes: &[u8],
+    start: usize,
+    end: usize,
+) -> TextSearchChunkResult {
+    let mut matches = Vec::new();
+    let mut offset = start;
+    let mut capped = false;
+    while offset < end {
+        if ascii_case_sensitive_matches_at(haystack, haystack_bytes, needle_bytes, offset) {
+            let match_end = offset + needle_bytes.len();
+            matches.push(TextSearchMatch {
+                start: offset,
+                end: match_end,
+            });
+            if matches.len() >= TEXT_SEARCH_MATCH_DISPLAY_LIMIT {
+                capped = match_end < haystack.len();
+                break;
+            }
+            offset = match_end;
+        } else {
+            offset += 1;
+        }
+    }
+    TextSearchChunkResult {
+        start,
+        matches,
+        capped,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn collect_ascii_case_insensitive_text_search_chunk(
+    haystack: &str,
+    haystack_bytes: &[u8],
+    needle_bytes: &[u8],
+    start: usize,
+    end: usize,
+) -> TextSearchChunkResult {
+    let mut matches = Vec::new();
+    let mut offset = start;
+    let mut capped = false;
+    while offset < end {
+        if ascii_case_insensitive_matches_at(haystack, haystack_bytes, needle_bytes, offset) {
+            let match_end = offset + needle_bytes.len();
+            matches.push(TextSearchMatch {
+                start: offset,
+                end: match_end,
+            });
+            if matches.len() >= TEXT_SEARCH_MATCH_DISPLAY_LIMIT {
+                capped = match_end < haystack.len();
+                break;
+            }
+            offset = match_end;
+        } else {
+            offset += 1;
+        }
+    }
+    TextSearchChunkResult {
+        start,
+        matches,
+        capped,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ascii_case_sensitive_matches_at(
+    haystack: &str,
+    haystack_bytes: &[u8],
+    needle_bytes: &[u8],
+    index: usize,
+) -> bool {
+    if index > haystack_bytes.len().saturating_sub(needle_bytes.len()) {
+        return false;
+    }
+    let end = index + needle_bytes.len();
+    haystack.is_char_boundary(index)
+        && haystack.is_char_boundary(end)
+        && &haystack_bytes[index..end] == needle_bytes
+}
+
 fn find_ascii_case_insensitive_match(
     haystack: &str,
     haystack_bytes: &[u8],
@@ -98,20 +326,31 @@ fn find_ascii_case_insensitive_match(
     }
     let mut index = offset;
     while index <= max_start {
-        let end = index + needle_bytes.len();
-        if haystack_bytes[index].eq_ignore_ascii_case(&needle_bytes[0])
-            && haystack.is_char_boundary(index)
-            && haystack.is_char_boundary(end)
-            && haystack_bytes[index..end]
-                .iter()
-                .zip(needle_bytes.iter())
-                .all(|(left, right)| left.eq_ignore_ascii_case(right))
-        {
+        if ascii_case_insensitive_matches_at(haystack, haystack_bytes, needle_bytes, index) {
             return Some(index);
         }
         index += 1;
     }
     None
+}
+
+fn ascii_case_insensitive_matches_at(
+    haystack: &str,
+    haystack_bytes: &[u8],
+    needle_bytes: &[u8],
+    index: usize,
+) -> bool {
+    if index > haystack_bytes.len().saturating_sub(needle_bytes.len()) {
+        return false;
+    }
+    let end = index + needle_bytes.len();
+    haystack_bytes[index].eq_ignore_ascii_case(&needle_bytes[0])
+        && haystack.is_char_boundary(index)
+        && haystack.is_char_boundary(end)
+        && haystack_bytes[index..end]
+            .iter()
+            .zip(needle_bytes.iter())
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
 }
 
 pub(crate) fn previous_text_search_index(current: usize, count: usize) -> usize {

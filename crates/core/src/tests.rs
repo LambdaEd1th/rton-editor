@@ -24,6 +24,7 @@ fn round_trips_standard_rton_bytes() {
     let decoded = decode_rton_bytes(&bytes).expect("rton decodes");
     assert_eq!(decoded.value, doc.value);
     assert_eq!(decoded.byte_len, Some(bytes.len()));
+    assert_eq!(decoded.encoding_source, BinaryEncoding::Standard);
 }
 
 #[test]
@@ -35,6 +36,7 @@ fn decodes_standard_rton_from_reader() {
     assert_eq!(decoded.value, doc.value);
     assert!(!decoded.encrypted_source);
     assert_eq!(decoded.byte_len, Some(bytes.len()));
+    assert_eq!(decoded.encoding_source, BinaryEncoding::Standard);
 }
 
 #[test]
@@ -141,6 +143,26 @@ fn caps_value_search_results() {
 }
 
 #[test]
+fn flattens_large_expanded_root_in_order() {
+    let value = Value::Object(
+        (0..600)
+            .map(|index| (format!("key{index:03}"), Value::UInt16(index)))
+            .collect(),
+    );
+    let expanded_paths = std::collections::HashSet::from(["$".to_string()]);
+
+    let rows = flatten_expanded_value_tree(&value, &expanded_paths, usize::MAX);
+
+    assert!(!rows.truncated);
+    assert_eq!(rows.rows.len(), 601);
+    assert_eq!(rows.rows[0].path, "$");
+    assert_eq!(rows.rows[1].path, "$.key000#0");
+    assert_eq!(rows.rows[1].label, "key000");
+    assert_eq!(rows.rows[600].path, "$.key599#599");
+    assert_eq!(rows.rows[600].label, "key599");
+}
+
+#[test]
 fn round_trips_encrypted_rton_bytes() {
     let doc = parse_text(SAMPLE, TextFormat::Json).expect("json parses");
     let bytes = encode_rton_bytes(
@@ -154,11 +176,49 @@ fn round_trips_encrypted_rton_bytes() {
     assert!(bytes.starts_with(ENCRYPTED_RTON_PREFIX));
     let decoded = decode_rton_bytes(&bytes).expect("encrypted rton decodes");
     assert!(decoded.encrypted_source);
+    assert_eq!(decoded.encoding_source, BinaryEncoding::Standard);
     assert_eq!(decoded.value, doc.value);
 
     let decoded =
         decode_rton_reader(std::io::Cursor::new(bytes)).expect("encrypted reader decodes");
     assert!(decoded.encrypted_source);
+    assert_eq!(decoded.encoding_source, BinaryEncoding::Standard);
+    assert_eq!(decoded.value, doc.value);
+}
+
+#[test]
+fn decodes_compact_rton_source_encoding() {
+    let doc = parse_text(SAMPLE, TextFormat::Json).expect("json parses");
+    let bytes = encode_rton_bytes(
+        &doc.value,
+        EncodeOptions {
+            encoding: BinaryEncoding::Compact,
+            encrypted: false,
+        },
+    )
+    .expect("compact rton encodes");
+
+    let decoded = decode_rton_bytes(&bytes).expect("compact rton decodes");
+    assert!(!decoded.encrypted_source);
+    assert_eq!(decoded.encoding_source, BinaryEncoding::Compact);
+    assert_eq!(decoded.value, doc.value);
+}
+
+#[test]
+fn decodes_encrypted_compact_rton_source_encoding() {
+    let doc = parse_text(SAMPLE, TextFormat::Json).expect("json parses");
+    let bytes = encode_rton_bytes(
+        &doc.value,
+        EncodeOptions {
+            encoding: BinaryEncoding::Compact,
+            encrypted: true,
+        },
+    )
+    .expect("encrypted compact rton encodes");
+
+    let decoded = decode_rton_bytes(&bytes).expect("encrypted compact rton decodes");
+    assert!(decoded.encrypted_source);
+    assert_eq!(decoded.encoding_source, BinaryEncoding::Compact);
     assert_eq!(decoded.value, doc.value);
 }
 

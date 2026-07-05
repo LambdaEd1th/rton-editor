@@ -10,7 +10,7 @@ pub(crate) use list_items::build_file_list_items;
 pub(crate) use loading::document_from_loaded_file_sync;
 pub(crate) use loading::{
     create_tab_from_loaded_file, dropped_directory_files, file_data_display_name,
-    loaded_file_draft_from_file_data, loaded_file_draft_from_native,
+    loaded_file_draft_from_file_data, loaded_file_drafts_from_native,
 };
 pub(crate) use state::{
     LoadedFileState, set_loaded_file_tab_id, stage_loaded_file_drafts, unlink_loaded_file_tab,

@@ -5,7 +5,7 @@ use crate::components::FileSelection;
 use crate::domain::{Status, Tone, is_loadable_display_name};
 use crate::file_import::{
     LoadedFileState, dropped_directory_files, file_data_display_name,
-    loaded_file_draft_from_file_data, loaded_file_draft_from_native, stage_loaded_file_drafts,
+    loaded_file_draft_from_file_data, loaded_file_drafts_from_native, stage_loaded_file_drafts,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::file_import::{collect_web_dropped_directory_files, loaded_file_draft_from_web_dropped};
@@ -69,9 +69,7 @@ pub(super) async fn handle_workspace_file_drop(
                     skipped += 1;
                     continue;
                 }
-                for folder_file in folder_files {
-                    drafts.push(loaded_file_draft_from_native(folder_file));
-                }
+                drafts.extend(loaded_file_drafts_from_native(folder_files));
             }
             Ok(None) => {
                 let name = file_data_display_name(&file);

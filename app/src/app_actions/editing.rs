@@ -493,6 +493,7 @@ mod tests {
             file_name: "large.json".to_string(),
             doc: None,
             byte_doc: None,
+            source_encode_options: rton_editor_core::EncodeOptions::default(),
             tree_rows: empty_tree_rows(),
             search_result: None,
             editor_text: std::sync::Arc::from(format!("{}z", "x".repeat(1024 * 1024 + 1))),

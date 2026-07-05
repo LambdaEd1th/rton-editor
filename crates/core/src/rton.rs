@@ -4,6 +4,8 @@ use std::io::{Read, Seek, SeekFrom};
 use crate::{BinaryEncoding, CoreError, DecodedDocument, EncodeOptions, Result};
 
 pub const ENCRYPTED_RTON_PREFIX: &[u8] = &[0x10, 0x00];
+const RTON_FILE_HEADER: &[u8] = b"RTON";
+const COMPACT_RTON_FILE_VERSION: u32 = 0x0001_0001;
 const RTON_DONE_MARKER: &[u8] = b"DONE";
 
 pub fn decode_rton_bytes(bytes: &[u8]) -> Result<DecodedDocument> {
@@ -61,7 +63,7 @@ where
         .seek(SeekFrom::Start(0))
         .map_err(|error| CoreError::Rton(error.to_string()))?;
 
-    let (value, encrypted_source) = if prefix_len == ENCRYPTED_RTON_PREFIX.len()
+    let (value, encrypted_source, encoding_source) = if prefix_len == ENCRYPTED_RTON_PREFIX.len()
         && prefix == ENCRYPTED_RTON_PREFIX
     {
         let mut bytes = Vec::with_capacity(byte_len);
@@ -69,23 +71,56 @@ where
             .read_to_end(&mut bytes)
             .map_err(|error| CoreError::Rton(error.to_string()))?;
         let plain = decrypt_data(&bytes).map_err(|error| CoreError::Rton(error.to_string()))?;
+        let encoding_source = detect_rton_binary_encoding(&plain);
         (
             from_reader::<_, Value>(std::io::Cursor::new(plain))
                 .map_err(|error| CoreError::Rton(error.to_string()))?,
             true,
+            encoding_source,
         )
     } else {
+        let encoding_source = rton_binary_encoding_from_reader(&mut reader)?;
+        reader
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| CoreError::Rton(error.to_string()))?;
         (
             from_reader::<_, Value>(reader).map_err(|error| CoreError::Rton(error.to_string()))?,
             false,
+            encoding_source,
         )
     };
 
-    Ok(DecodedDocument::new(
+    Ok(DecodedDocument::new_with_source_encoding(
         value,
         encrypted_source,
+        encoding_source,
         Some(byte_len),
     ))
+}
+
+fn rton_binary_encoding_from_reader<R>(reader: &mut R) -> Result<BinaryEncoding>
+where
+    R: Read + Seek,
+{
+    let mut header = [0_u8; 8];
+    let len = reader
+        .read(&mut header)
+        .map_err(|error| CoreError::Rton(error.to_string()))?;
+    if len < header.len() {
+        return Ok(BinaryEncoding::Standard);
+    }
+    Ok(detect_rton_binary_encoding(&header))
+}
+
+pub fn detect_rton_binary_encoding(bytes: &[u8]) -> BinaryEncoding {
+    if bytes.len() >= 8
+        && &bytes[..4] == RTON_FILE_HEADER
+        && u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) == COMPACT_RTON_FILE_VERSION
+    {
+        BinaryEncoding::Compact
+    } else {
+        BinaryEncoding::Standard
+    }
 }
 
 pub fn encode_rton_bytes(value: &Value, options: EncodeOptions) -> Result<Vec<u8>> {

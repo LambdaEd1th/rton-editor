@@ -46,6 +46,11 @@ struct ParsePayload {
     search_query: String,
 }
 
+struct DocumentMetadata {
+    tree_rows: Arc<TreeRows>,
+    search_result: Option<Arc<ValueSearchResult>>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParseReport {
     Foreground,
@@ -586,21 +591,11 @@ async fn parse_tab_payload(tab: EditorTabState) -> Result<ParsePayload, String> 
 }
 
 async fn parse_payload_for_doc(doc: Arc<DecodedDocument>, search_query: String) -> ParsePayload {
-    let tree_rows = {
-        let doc = doc.clone();
-        run_cpu_task(move || value_tree_rows_for_doc(&doc)).await
-    };
-    let search_result = if search_query.trim().is_empty() {
-        None
-    } else {
-        let doc = doc.clone();
-        let query = search_query.clone();
-        run_cpu_task(move || value_search_result_for_doc(&doc, &query)).await
-    };
+    let metadata = document_metadata_for_doc(doc.clone(), search_query.clone()).await;
     ParsePayload {
         doc,
-        tree_rows,
-        search_result,
+        tree_rows: metadata.tree_rows,
+        search_result: metadata.search_result,
         search_query,
     }
 }
@@ -611,17 +606,7 @@ async fn cached_mode_switch_payload(
     was_dirty: bool,
     search_query: String,
 ) -> ModeSwitchPayload {
-    let tree_rows = {
-        let doc = doc.clone();
-        run_cpu_task(move || value_tree_rows_for_doc(&doc)).await
-    };
-    let search_result = if search_query.trim().is_empty() {
-        None
-    } else {
-        let doc = doc.clone();
-        let query = search_query.clone();
-        run_cpu_task(move || value_search_result_for_doc(&doc, &query)).await
-    };
+    let metadata = document_metadata_for_doc(doc.clone(), search_query.clone()).await;
     ModeSwitchPayload {
         doc,
         surface: crate::domain::editor_tab::TabSurface {
@@ -630,8 +615,8 @@ async fn cached_mode_switch_payload(
             text_buffer: cache.text_buffer,
             text_state: cache.text_state,
         },
-        tree_rows,
-        search_result,
+        tree_rows: metadata.tree_rows,
+        search_result: metadata.search_result,
         search_query,
         was_dirty,
     }
@@ -657,34 +642,109 @@ async fn convert_tab_mode(
         let doc =
             run_cpu_task(move || document_for_owned_tab(tab).map_err(|error| error.to_string()))
                 .await?;
-        let surface = {
-            let doc = doc.clone();
-            run_cpu_task(move || {
-                tab_surface_for_document(&doc, next_mode, encode_options)
-                    .map_err(|error| error.to_string())
-            })
-            .await?
-        };
-        let tree_rows = {
-            let doc = doc.clone();
-            run_cpu_task(move || value_tree_rows_for_doc(&doc)).await
-        };
-        let search_result = if search_query.trim().is_empty() {
-            None
-        } else {
-            let doc = doc.clone();
-            let query = search_query.clone();
-            run_cpu_task(move || value_search_result_for_doc(&doc, &query)).await
-        };
+        let (surface, metadata) =
+            mode_switch_parts_for_doc(doc.clone(), next_mode, encode_options, search_query.clone())
+                .await?;
         Ok(ModeSwitchPayload {
             doc,
             surface,
-            tree_rows,
-            search_result,
+            tree_rows: metadata.tree_rows,
+            search_result: metadata.search_result,
             search_query,
             was_dirty,
         })
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn document_metadata_for_doc(
+    doc: Arc<DecodedDocument>,
+    search_query: String,
+) -> DocumentMetadata {
+    run_cpu_task(move || document_metadata_for_doc_sync(doc, search_query)).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn document_metadata_for_doc(
+    doc: Arc<DecodedDocument>,
+    search_query: String,
+) -> DocumentMetadata {
+    let tree_rows = {
+        let doc = doc.clone();
+        run_cpu_task(move || value_tree_rows_for_doc(&doc)).await
+    };
+    let search_result = if search_query.trim().is_empty() {
+        None
+    } else {
+        let doc = doc.clone();
+        let query = search_query.clone();
+        run_cpu_task(move || value_search_result_for_doc(&doc, &query)).await
+    };
+    DocumentMetadata {
+        tree_rows,
+        search_result,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn document_metadata_for_doc_sync(
+    doc: Arc<DecodedDocument>,
+    search_query: String,
+) -> DocumentMetadata {
+    let search_enabled = !search_query.trim().is_empty();
+    std::thread::scope(|scope| {
+        let tree_doc = doc.clone();
+        let tree_rows = scope.spawn(move || value_tree_rows_for_doc(&tree_doc));
+        let search_result = search_enabled.then(|| {
+            let search_doc = doc.clone();
+            let query = search_query;
+            scope.spawn(move || value_search_result_for_doc(&search_doc, &query))
+        });
+        DocumentMetadata {
+            tree_rows: tree_rows.join().expect("value tree task panicked"),
+            search_result: search_result
+                .map(|task| task.join().expect("value search task panicked"))
+                .flatten(),
+        }
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn mode_switch_parts_for_doc(
+    doc: Arc<DecodedDocument>,
+    next_mode: EditorMode,
+    encode_options: EncodeOptions,
+    search_query: String,
+) -> Result<(crate::domain::editor_tab::TabSurface, DocumentMetadata), String> {
+    run_cpu_task(move || {
+        let search_enabled = !search_query.trim().is_empty();
+        std::thread::scope(|scope| {
+            let surface_doc = doc.clone();
+            let surface = scope.spawn(move || {
+                tab_surface_for_document(&surface_doc, next_mode, encode_options)
+                    .map_err(|error| error.to_string())
+            });
+            let tree_doc = doc.clone();
+            let tree_rows = scope.spawn(move || value_tree_rows_for_doc(&tree_doc));
+            let search_result = search_enabled.then(|| {
+                let search_doc = doc.clone();
+                let query = search_query;
+                scope.spawn(move || value_search_result_for_doc(&search_doc, &query))
+            });
+
+            let surface = surface.join().expect("mode surface task panicked")?;
+            Ok((
+                surface,
+                DocumentMetadata {
+                    tree_rows: tree_rows.join().expect("value tree task panicked"),
+                    search_result: search_result
+                        .map(|task| task.join().expect("value search task panicked"))
+                        .flatten(),
+                },
+            ))
+        })
+    })
+    .await
 }
 
 #[cfg(target_arch = "wasm32")]
