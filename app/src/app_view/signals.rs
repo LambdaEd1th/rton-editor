@@ -55,7 +55,7 @@ pub(super) fn use_app_signals(initial_locale_snapshot: Locale) -> AppSignals {
         compact_output: use_signal(|| false),
         encrypt_output: use_signal(|| false),
         dragging_files: use_signal(|| false),
-        theme_preference: use_signal(|| ThemePreference::System),
+        theme_preference: use_signal(platform::read_theme_preference),
         locale: use_signal(move || initial_locale_snapshot),
         i18n_revision: use_signal(|| 0_u64),
         #[cfg(target_arch = "wasm32")]

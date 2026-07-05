@@ -2,8 +2,9 @@
 use js_sys::{Function, Promise, Reflect};
 #[cfg(target_arch = "wasm32")]
 use rton_editor_core::{
-    WorkerModeSwitchRequest, WorkerModeSwitchResponse, WorkerParseRequest, WorkerParseResponse,
-    WorkerRtonSizeRequest, WorkerRtonSizeResponse,
+    TextFormat, WorkerModeSwitchRequest, WorkerModeSwitchResponse, WorkerOpenTextRequest,
+    WorkerOpenTextResponse, WorkerParseRequest, WorkerParseResponse, WorkerRtonSizeRequest,
+    WorkerRtonSizeResponse,
 };
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
@@ -62,6 +63,39 @@ pub async fn run_rton_size_worker(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn run_open_text_worker(
+    request: WorkerOpenTextRequest,
+) -> Result<WorkerOpenTextResponse, String> {
+    let request = serde_wasm_bindgen::to_value(&request).map_err(|error| error.to_string())?;
+    let options = WorkerOptions::new();
+    options.set_type(WorkerType::Module);
+    let worker = Worker::new_with_options(RTON_WORKER_URL, &options).map_err(js_error_string)?;
+    let message = worker_message("open-text", &request)?;
+    let response = await_worker_value(&worker, message)
+        .await
+        .and_then(parse_open_text_envelope);
+    worker.terminate();
+    response
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn run_open_text_file_worker(
+    file: web_sys::File,
+    format: TextFormat,
+    search_query: String,
+) -> Result<WorkerOpenTextResponse, String> {
+    let options = WorkerOptions::new();
+    options.set_type(WorkerType::Module);
+    let worker = Worker::new_with_options(RTON_WORKER_URL, &options).map_err(js_error_string)?;
+    let message = open_text_file_worker_message(file, format, search_query)?;
+    let response = await_worker_value(&worker, message)
+        .await
+        .and_then(parse_open_text_envelope);
+    worker.terminate();
+    response
+}
+
+#[cfg(target_arch = "wasm32")]
 fn worker_message(kind: &str, request: &JsValue) -> Result<JsValue, String> {
     let message = js_sys::Object::new();
     Reflect::set(
@@ -72,6 +106,44 @@ fn worker_message(kind: &str, request: &JsValue) -> Result<JsValue, String> {
     .map_err(js_error_string)?;
     Reflect::set(&message, &JsValue::from_str("request"), request).map_err(js_error_string)?;
     Ok(message.into())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn open_text_file_worker_message(
+    file: web_sys::File,
+    format: TextFormat,
+    search_query: String,
+) -> Result<JsValue, String> {
+    let message = js_sys::Object::new();
+    Reflect::set(
+        &message,
+        &JsValue::from_str("kind"),
+        &JsValue::from_str("open-text-file"),
+    )
+    .map_err(js_error_string)?;
+    Reflect::set(&message, &JsValue::from_str("file"), file.as_ref()).map_err(js_error_string)?;
+    Reflect::set(
+        &message,
+        &JsValue::from_str("format"),
+        &JsValue::from_str(text_format_worker_label(format)),
+    )
+    .map_err(js_error_string)?;
+    Reflect::set(
+        &message,
+        &JsValue::from_str("search_query"),
+        &JsValue::from_str(&search_query),
+    )
+    .map_err(js_error_string)?;
+    Ok(message.into())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn text_format_worker_label(format: TextFormat) -> &'static str {
+    match format {
+        TextFormat::Json => "Json",
+        TextFormat::Yaml => "Yaml",
+        TextFormat::Toml => "Toml",
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -119,6 +191,12 @@ fn parse_parse_envelope(value: JsValue) -> Result<WorkerParseResponse, String> {
 
 #[cfg(target_arch = "wasm32")]
 fn parse_rton_size_envelope(value: JsValue) -> Result<WorkerRtonSizeResponse, String> {
+    let response = worker_response_value(value)?;
+    serde_wasm_bindgen::from_value(response).map_err(|error| error.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_open_text_envelope(value: JsValue) -> Result<WorkerOpenTextResponse, String> {
     let response = worker_response_value(value)?;
     serde_wasm_bindgen::from_value(response).map_err(|error| error.to_string())
 }

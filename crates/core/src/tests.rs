@@ -253,6 +253,63 @@ fn worker_parse_decodes_source_and_returns_index_payload() {
 }
 
 #[test]
+fn worker_open_text_returns_surface_and_index_for_valid_text() {
+    let doc = parse_text(SAMPLE, TextFormat::Json).expect("json parses");
+
+    let response = perform_worker_open_text(WorkerOpenTextRequest {
+        bytes: SAMPLE.as_bytes().to_vec(),
+        format: TextFormat::Json,
+        search_query: "cost".to_string(),
+    })
+    .expect("worker open text succeeds");
+
+    assert_eq!(response.doc.as_ref().expect("doc").value, doc.value);
+    assert!(!response.tree_rows.rows.is_empty());
+    assert_eq!(
+        response
+            .search_result
+            .as_ref()
+            .expect("search result")
+            .matches
+            .len(),
+        1
+    );
+
+    let WorkerSurface::Text {
+        text,
+        line_offsets,
+        byte_count,
+        line_count,
+        format,
+    } = response.surface
+    else {
+        panic!("expected text surface");
+    };
+    assert_eq!(format, TextFormat::Json);
+    assert_eq!(text, SAMPLE);
+    assert_eq!(byte_count, text.len());
+    assert_eq!(line_count, line_offsets.len());
+}
+
+#[test]
+fn worker_open_text_keeps_surface_for_invalid_text() {
+    let response = perform_worker_open_text(WorkerOpenTextRequest {
+        bytes: b"{ invalid".to_vec(),
+        format: TextFormat::Json,
+        search_query: "invalid".to_string(),
+    })
+    .expect("worker open text keeps editable surface");
+
+    assert!(response.doc.is_none());
+    assert!(response.tree_rows.rows.is_empty());
+    assert!(response.search_result.is_none());
+    let WorkerSurface::Text { text, .. } = response.surface else {
+        panic!("expected text surface");
+    };
+    assert_eq!(text, "{ invalid");
+}
+
+#[test]
 fn worker_rton_size_returns_target_encoded_length() {
     let doc = parse_text(SAMPLE, TextFormat::Json).expect("json parses");
     let bytes = encode_rton_bytes(&doc.value, EncodeOptions::default()).expect("rton encodes");

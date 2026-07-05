@@ -28,6 +28,12 @@ use state::{
     ByteSelection, HEX_BYTES_PER_ROW, HexInspectorResizeDrag, HexPane, use_hex_editor_signals,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct HexContextMenu {
+    x: i32,
+    y: i32,
+}
+
 #[component]
 pub(crate) fn HexEditor(
     bytes: ByteDocument,
@@ -38,6 +44,7 @@ pub(crate) fn HexEditor(
     on_undo: EventHandler<()>,
     on_redo: EventHandler<()>,
     on_search_visible_change: EventHandler<bool>,
+    suppress_resize_observer: bool,
 ) -> Element {
     let hex_signals = use_hex_editor_signals();
     let mut selected_offset = hex_signals.selected_offset;
@@ -57,6 +64,10 @@ pub(crate) fn HexEditor(
     let case_sensitive = hex_signals.case_sensitive;
     let mut hex_search_result = use_signal(empty_hex_search_result);
     let mut hex_search_generation = use_signal(|| 0_u64);
+    let mut scroll_mounted = use_signal(|| None::<MountedEvent>);
+    let mut editor_mounted = use_signal(|| None::<MountedEvent>);
+    let mut input_sink_value = use_signal(String::new);
+    let mut context_menu = use_signal(|| None::<HexContextMenu>);
 
     let search_mode_input = *search_mode.read();
     let search_query_input = search_query.read().clone();
@@ -92,6 +103,20 @@ pub(crate) fn HexEditor(
             });
         },
     ));
+
+    use_effect(use_reactive(&suppress_resize_observer, move |suppressed| {
+        if suppressed {
+            return;
+        }
+        let Some(event) = scroll_mounted.peek().clone() else {
+            return;
+        };
+        spawn(async move {
+            if let Ok(rect) = event.get_client_rect().await {
+                update_hex_viewport_height(viewport_height, rect.height());
+            }
+        });
+    }));
 
     let snapshot = hex_editor_snapshot(
         &bytes,
@@ -138,6 +163,12 @@ pub(crate) fn HexEditor(
     let selection_label = snapshot.selection_label;
     let inspector_drag_snapshot = *inspector_drag.read();
     let inspector_width_snapshot = *inspector_width.read();
+    let context_menu_snapshot = *context_menu.read();
+    let context_menu_open = context_menu_snapshot.is_some();
+
+    use_effect(use_reactive(&context_menu_open, move |open| {
+        set_hex_context_menu_document_dismiss_listener(open);
+    }));
 
     use_effect(use_reactive((&jump_target,), move |(jump_target,)| {
         let Some(target) = jump_target else {
@@ -163,6 +194,12 @@ pub(crate) fn HexEditor(
 
     let bytes_for_key = bytes.clone();
     let handle_key = move |event: KeyboardEvent| {
+        if event.key().to_string() == "Escape" && context_menu.peek().is_some() {
+            event.prevent_default();
+            context_menu.set(None);
+            return;
+        }
+        context_menu.set(None);
         handle_hex_key(
             event,
             &bytes_for_key,
@@ -183,6 +220,7 @@ pub(crate) fn HexEditor(
     };
 
     let mut update_selection_from_pointer = move |offset: usize, pane: HexPane, extend: bool| {
+        context_menu.set(None);
         active_pane.set(pane);
         pending_hex_edit.set(None);
         if extend {
@@ -201,6 +239,23 @@ pub(crate) fn HexEditor(
         }
         selected_offset.set(offset);
         pointer_selecting.set(true);
+    };
+
+    let mut open_context_menu = move |offset: usize, pane: HexPane, menu: HexContextMenu| {
+        active_pane.set(pane);
+        pending_hex_edit.set(None);
+        pointer_selecting.set(false);
+        if !hex_selection_contains(normalized_selection, offset) {
+            selection_anchor.set(offset);
+            selection_range.set(None);
+        }
+        selected_offset.set(offset);
+        let mounted = editor_mounted.peek().clone();
+        spawn(async move {
+            context_menu.set(Some(
+                hex_context_menu_from_client_position(menu, mounted).await,
+            ));
+        });
     };
 
     let search_matches_for_next = search_matches.clone();
@@ -324,12 +379,66 @@ pub(crate) fn HexEditor(
             class: "rton-hex-editor",
             style: "{style}",
             tabindex: "0",
+            onmounted: move |event| editor_mounted.set(Some(event)),
             onkeydown: handle_key,
+            onmousedown: move |_| context_menu.set(None),
             onmouseup: move |_| {
                 pointer_selecting.set(false);
                 inspector_drag.set(None);
             },
             onmousemove: handle_inspector_mouse_move,
+            button {
+                r#type: "button",
+                class: "rton-hex-context-close-sink",
+                tabindex: "-1",
+                aria_hidden: "true",
+                onclick: move |_| context_menu.set(None)
+            }
+            textarea {
+                id: "rton-hex-input-sink",
+                class: "rton-hex-input-sink",
+                aria_label: "HEX editor clipboard input",
+                spellcheck: "false",
+                autocapitalize: "off",
+                autocomplete: "off",
+                value: "{input_sink_value}",
+                oninput: {
+                    let bytes = bytes.clone();
+                    move |event| {
+                        context_menu.set(None);
+                        let text = event.value();
+                        input_sink_value.set(String::new());
+                        paste_hex_text_from_clipboard(
+                            &bytes,
+                            text,
+                            *active_pane.read(),
+                            *insert_mode.read(),
+                            bytes_len,
+                            safe_selected_offset,
+                            hex_signals.commit_targets(on_change),
+                        );
+                    }
+                },
+                onpaste: {
+                    let bytes = bytes.clone();
+                    move |event| {
+                        if let Some(text) = hex_clipboard_event_text(&event) {
+                            event.prevent_default();
+                            paste_hex_text_from_clipboard(
+                                &bytes,
+                                text,
+                                *active_pane.read(),
+                                *insert_mode.read(),
+                                bytes_len,
+                                safe_selected_offset,
+                                hex_signals.commit_targets(on_change),
+                            );
+                        } else {
+                            input_sink_value.set(String::new());
+                        }
+                    }
+                }
+            }
             div { class: "rton-hex-summary",
                 span { "{format_bytes(bytes_len)}" }
                 span { "Offset {to_offset_hex(safe_selected_offset, offset_width - 2)}" }
@@ -361,17 +470,31 @@ pub(crate) fn HexEditor(
                     }
                     div {
                         class: "rton-hex-scroll",
-                        onmounted: move |event| async move {
-                            if let Ok(rect) = event.get_client_rect().await {
-                                update_hex_viewport_height(viewport_height, rect.height());
+                        onwheel: move |_| {
+                            context_menu.set(None);
+                            pointer_selecting.set(false);
+                        },
+                        onmounted: move |event| {
+                            scroll_mounted.set(Some(event.clone()));
+                            async move {
+                                if let Ok(rect) = event.get_client_rect().await {
+                                    update_hex_viewport_height(viewport_height, rect.height());
+                                }
                             }
                         },
                         onresize: move |event| {
+                            if suppress_resize_observer {
+                                return;
+                            }
                             if let Ok(size) = event.get_content_box_size() {
                                 update_hex_viewport_height(viewport_height, size.height);
                             }
                         },
-                        onscroll: move |event| scroll_top.set(event.scroll_top()),
+                        onscroll: move |event| {
+                            context_menu.set(None);
+                            pointer_selecting.set(false);
+                            scroll_top.set(event.scroll_top());
+                        },
                         div {
                             class: "rton-hex-virtual-space",
                             style: "height: {virtual_scroll_content_height}px",
@@ -400,6 +523,9 @@ pub(crate) fn HexEditor(
                                             });
                                             selected_offset.set(selection.0);
                                         }
+                                    },
+                                    on_context_menu: move |(offset, pane, menu): (usize, HexPane, HexContextMenu)| {
+                                        open_context_menu(offset, pane, menu);
                                     }
                                 }
                             }
@@ -446,6 +572,86 @@ pub(crate) fn HexEditor(
                     on_close: move |_| on_search_visible_change.call(false)
                 }
             }
+            if let Some(menu) = context_menu_snapshot {
+                div {
+                    class: "rton-hex-context-backdrop",
+                    onmousedown: move |event| {
+                        event.prevent_default();
+                        context_menu.set(None);
+                    },
+                    oncontextmenu: move |event| {
+                        event.prevent_default();
+                        context_menu.set(None);
+                    }
+                }
+                div {
+                    class: "rton-hex-context-menu",
+                    role: "menu",
+                    style: "left: {menu.x}px; top: {menu.y}px",
+                    onmousedown: move |event| {
+                        event.prevent_default();
+                        event.stop_propagation();
+                    },
+                    button {
+                        r#type: "button",
+                        role: "menuitem",
+                        onclick: {
+                            let bytes = bytes.clone();
+                            move |_| {
+                                copy_hex_selection_to_clipboard(
+                                    &bytes,
+                                    normalized_selection,
+                                    safe_selected_offset,
+                                    *active_pane.read(),
+                                );
+                                context_menu.set(None);
+                                focus_hex_editor();
+                            }
+                        },
+                        {i18n.t("editor-context-copy")}
+                    }
+                    button {
+                        r#type: "button",
+                        role: "menuitem",
+                        onclick: {
+                            let bytes = bytes.clone();
+                            move |_| {
+                                cut_hex_selection_to_clipboard(
+                                    &bytes,
+                                    normalized_selection,
+                                    safe_selected_offset,
+                                    *active_pane.read(),
+                                    *insert_mode.read(),
+                                    hex_signals.commit_targets(on_change),
+                                );
+                                context_menu.set(None);
+                                focus_hex_editor();
+                            }
+                        },
+                        {i18n.t("editor-context-cut")}
+                    }
+                    button {
+                        r#type: "button",
+                        role: "menuitem",
+                        onclick: move |_| {
+                            context_menu.set(None);
+                            paste_hex_from_clipboard();
+                        },
+                        {i18n.t("editor-context-paste")}
+                    }
+                    div { class: "rton-hex-context-menu-separator", role: "separator" }
+                    button {
+                        r#type: "button",
+                        role: "menuitem",
+                        onclick: move |_| {
+                            select_all_hex_bytes(bytes_len, selection_anchor, selection_range, selected_offset);
+                            context_menu.set(None);
+                            focus_hex_editor();
+                        },
+                        {i18n.t("editor-context-select-all")}
+                    }
+                }
+            }
         }
     }
 }
@@ -460,5 +666,388 @@ fn empty_hex_search_result() -> HexSearchResult {
 fn clear_hex_search_result(mut result: Signal<HexSearchResult>) {
     if *result.peek() != empty_hex_search_result() {
         result.set(empty_hex_search_result());
+    }
+}
+
+async fn hex_context_menu_from_client_position(
+    menu: HexContextMenu,
+    mounted: Option<MountedEvent>,
+) -> HexContextMenu {
+    let Some(event) = mounted else {
+        return menu;
+    };
+    let Ok(rect) = event.get_client_rect().await else {
+        return menu;
+    };
+    HexContextMenu {
+        x: (menu.x as f64 - rect.origin.x).round().max(0.0) as i32,
+        y: (menu.y as f64 - rect.origin.y).round().max(0.0) as i32,
+    }
+}
+
+fn hex_selection_contains(selection: Option<ByteSelection>, offset: usize) -> bool {
+    selection.is_some_and(|selection| {
+        let start = selection.anchor.min(selection.focus);
+        let end = selection.anchor.max(selection.focus);
+        (start..=end).contains(&offset)
+    })
+}
+
+fn copy_hex_selection_to_clipboard(
+    bytes: &ByteDocument,
+    selection: Option<ByteSelection>,
+    fallback_offset: usize,
+    pane: HexPane,
+) {
+    let Some(selected) = selected_hex_bytes(bytes, selection, fallback_offset) else {
+        return;
+    };
+    write_hex_clipboard(&format_hex_clipboard_text(&selected, pane));
+}
+
+fn cut_hex_selection_to_clipboard(
+    bytes: &ByteDocument,
+    selection: Option<ByteSelection>,
+    fallback_offset: usize,
+    pane: HexPane,
+    insert_mode: bool,
+    commit_targets: HexCommitTargets,
+) {
+    let Some((target, selected)) = selected_hex_target_and_bytes(bytes, selection, fallback_offset)
+    else {
+        return;
+    };
+    write_hex_clipboard(&format_hex_clipboard_text(&selected, pane));
+    commit_hex_clear_target(bytes, target, insert_mode, commit_targets);
+}
+
+fn selected_hex_bytes(
+    bytes: &ByteDocument,
+    selection: Option<ByteSelection>,
+    fallback_offset: usize,
+) -> Option<Vec<u8>> {
+    selected_hex_range_and_bytes(bytes, selection, fallback_offset).map(|(_, _, selected)| selected)
+}
+
+fn selected_hex_range_and_bytes(
+    bytes: &ByteDocument,
+    selection: Option<ByteSelection>,
+    fallback_offset: usize,
+) -> Option<(usize, usize, Vec<u8>)> {
+    let (target, selected) = selected_hex_target_and_bytes(bytes, selection, fallback_offset)?;
+    Some((target.offset, target.length, selected))
+}
+
+fn selected_hex_target_and_bytes(
+    bytes: &ByteDocument,
+    selection: Option<ByteSelection>,
+    fallback_offset: usize,
+) -> Option<(HexSelectionTarget, Vec<u8>)> {
+    let target = hex_selection_target(selection, bytes.len(), fallback_offset)?;
+    let selected = hex_target_bytes(bytes, target)?;
+    Some((target, selected))
+}
+
+fn format_hex_clipboard_text(bytes: &[u8], pane: HexPane) -> String {
+    match pane {
+        HexPane::Hex => bytes
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+        HexPane::Ascii => bytes.iter().map(|byte| *byte as char).collect(),
+    }
+}
+
+fn paste_hex_text_from_clipboard(
+    bytes: &ByteDocument,
+    text: String,
+    pane: HexPane,
+    insert_mode: bool,
+    bytes_len: usize,
+    safe_selected_offset: usize,
+    commit_targets: HexCommitTargets,
+) {
+    let Some(values) = parse_hex_clipboard_text(&text, pane) else {
+        return;
+    };
+    if values.is_empty() {
+        return;
+    }
+    let Some(target) = hex_selection_target(
+        *commit_targets.selection_range.read(),
+        bytes_len,
+        safe_selected_offset,
+    ) else {
+        return;
+    };
+    commit_hex_write_target(bytes, target, values, insert_mode, commit_targets);
+}
+
+fn parse_hex_clipboard_text(text: &str, pane: HexPane) -> Option<Vec<u8>> {
+    match pane {
+        HexPane::Hex => parse_hex_bytes_text(text),
+        HexPane::Ascii => text
+            .chars()
+            .map(|ch| {
+                let code = ch as u32;
+                (code <= 0xff).then_some(code as u8)
+            })
+            .collect(),
+    }
+}
+
+fn parse_hex_bytes_text(text: &str) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
+    for token in text.split(|ch: char| ch.is_ascii_whitespace() || ",;:-".contains(ch)) {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let token = token
+            .strip_prefix("0x")
+            .or_else(|| token.strip_prefix("0X"))
+            .unwrap_or(token);
+        if token.is_empty()
+            || token.len() % 2 != 0
+            || !token.chars().all(|ch| ch.is_ascii_hexdigit())
+        {
+            return None;
+        }
+        for chunk_start in (0..token.len()).step_by(2) {
+            bytes.push(u8::from_str_radix(&token[chunk_start..chunk_start + 2], 16).ok()?);
+        }
+    }
+    (!bytes.is_empty()).then_some(bytes)
+}
+
+fn select_all_hex_bytes(
+    bytes_len: usize,
+    mut selection_anchor: Signal<usize>,
+    mut selection_range: Signal<Option<ByteSelection>>,
+    mut selected_offset: Signal<usize>,
+) {
+    if bytes_len == 0 {
+        return;
+    }
+    selection_anchor.set(0);
+    selected_offset.set(bytes_len - 1);
+    selection_range.set((bytes_len > 1).then_some(ByteSelection {
+        anchor: 0,
+        focus: bytes_len - 1,
+    }));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn hex_clipboard_event_text(event: &dioxus_html::ClipboardEvent) -> Option<String> {
+    use wasm_bindgen::JsCast;
+
+    let web_event = event.data.downcast::<web_sys::Event>()?;
+    let clipboard_event = web_event.dyn_ref::<web_sys::ClipboardEvent>()?;
+    clipboard_event
+        .clipboard_data()?
+        .get_data("text/plain")
+        .ok()
+        .filter(|text| !text.is_empty())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn hex_clipboard_event_text(_event: &dioxus_html::ClipboardEvent) -> Option<String> {
+    None
+}
+
+fn write_hex_clipboard(text: &str) {
+    let Ok(text_json) = serde_json::to_string(text) else {
+        return;
+    };
+    dioxus::document::eval(&format!(
+        r#"
+        (() => {{
+            const text = {text_json};
+            const fallbackCopy = () => {{
+                const previous = document.activeElement;
+                const textarea = document.createElement("textarea");
+                textarea.value = text;
+                textarea.setAttribute("readonly", "true");
+                textarea.style.position = "fixed";
+                textarea.style.left = "-10000px";
+                textarea.style.top = "0";
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                try {{
+                    document.execCommand("copy");
+                }} catch (_error) {{}}
+                textarea.remove();
+                previous?.focus?.({{ preventScroll: true }});
+            }};
+            if (navigator.clipboard?.writeText) {{
+                navigator.clipboard.writeText(text).catch(fallbackCopy);
+            }} else {{
+                fallbackCopy();
+            }}
+        }})();
+        "#
+    ));
+}
+
+fn paste_hex_from_clipboard() {
+    dioxus::document::eval(
+        r#"
+        (() => {
+            const input = document.getElementById("rton-hex-input-sink");
+            if (!input) return;
+            try {
+                input.focus({ preventScroll: true });
+            } catch (_error) {
+                input.focus();
+            }
+
+            const dispatchText = (text) => {
+                if (typeof text !== "string" || text.length === 0) return;
+                input.value = text;
+                let event;
+                try {
+                    event = new InputEvent("input", {
+                        bubbles: true,
+                        data: text,
+                        inputType: "insertFromPaste",
+                    });
+                } catch (_error) {
+                    event = new Event("input", { bubbles: true });
+                }
+                input.dispatchEvent(event);
+            };
+
+            if (navigator.clipboard?.readText) {
+                navigator.clipboard.readText().then(dispatchText).catch(() => {
+                    try {
+                        document.execCommand?.("paste");
+                    } catch (_error) {}
+                });
+            } else {
+                try {
+                    document.execCommand?.("paste");
+                } catch (_error) {}
+            }
+        })();
+        "#,
+    );
+}
+
+fn focus_hex_editor() {
+    dioxus::document::eval(
+        r#"
+        (() => {
+            const editor = document.querySelector(".rton-hex-editor");
+            if (!editor) return;
+            try {
+                editor.focus({ preventScroll: true });
+            } catch (_error) {
+                editor.focus();
+            }
+        })();
+        "#,
+    );
+}
+
+fn set_hex_context_menu_document_dismiss_listener(enabled: bool) {
+    if !enabled {
+        dioxus::document::eval(
+            r#"
+            (() => {
+                window.__rtonHexContextMenuDismiss?.cleanup?.();
+                window.__rtonHexContextMenuDismiss = undefined;
+            })();
+            "#,
+        );
+        return;
+    }
+
+    dioxus::document::eval(
+        r#"
+        (() => {
+            window.__rtonHexContextMenuDismiss?.cleanup?.();
+
+            const closeMenu = (event) => {
+                if (event.target?.closest?.(".rton-hex-context-menu")) {
+                    return;
+                }
+                cleanup();
+                if (event.type === "contextmenu") {
+                    event.preventDefault();
+                }
+                event.stopPropagation();
+                event.stopImmediatePropagation?.();
+                document.querySelector(".rton-hex-context-close-sink")?.click();
+            };
+
+            const cleanup = () => {
+                document.removeEventListener("mousedown", closeMenu, true);
+                document.removeEventListener("contextmenu", closeMenu, true);
+                if (window.__rtonHexContextMenuDismiss?.cleanup === cleanup) {
+                    window.__rtonHexContextMenuDismiss = undefined;
+                }
+            };
+
+            document.addEventListener("mousedown", closeMenu, true);
+            document.addEventListener("contextmenu", closeMenu, true);
+            window.__rtonHexContextMenuDismiss = { cleanup };
+        })();
+        "#,
+    );
+}
+
+#[cfg(test)]
+mod context_menu_tests {
+    use crate::domain::ByteDocument;
+
+    use super::state::ByteSelection;
+    use super::{
+        HexPane, format_hex_clipboard_text, parse_hex_clipboard_text, selected_hex_range_and_bytes,
+    };
+
+    #[test]
+    fn parses_hex_clipboard_tokens() {
+        assert_eq!(
+            parse_hex_clipboard_text("0xDE AD-be:ef", HexPane::Hex),
+            Some(vec![0xde, 0xad, 0xbe, 0xef])
+        );
+        assert_eq!(parse_hex_clipboard_text("ABC", HexPane::Hex), None);
+        assert_eq!(parse_hex_clipboard_text("GG", HexPane::Hex), None);
+    }
+
+    #[test]
+    fn formats_hex_clipboard_by_active_pane() {
+        assert_eq!(
+            format_hex_clipboard_text(&[0xde, 0xad, 0xbe, 0xef], HexPane::Hex),
+            "DE AD BE EF"
+        );
+        assert_eq!(format_hex_clipboard_text(b"RTON", HexPane::Ascii), "RTON");
+    }
+
+    #[test]
+    fn selected_hex_range_falls_back_to_current_byte() {
+        let bytes = ByteDocument::from_vec(vec![0x52, 0x54, 0x4f, 0x4e]);
+        assert_eq!(
+            selected_hex_range_and_bytes(&bytes, None, 2),
+            Some((2, 1, vec![0x4f]))
+        );
+    }
+
+    #[test]
+    fn selected_hex_range_uses_explicit_selection() {
+        let bytes = ByteDocument::from_vec(vec![0x52, 0x54, 0x4f, 0x4e]);
+        assert_eq!(
+            selected_hex_range_and_bytes(
+                &bytes,
+                Some(ByteSelection {
+                    anchor: 3,
+                    focus: 1,
+                }),
+                0,
+            ),
+            Some((1, 3, vec![0x54, 0x4f, 0x4e]))
+        );
     }
 }

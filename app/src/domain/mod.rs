@@ -30,10 +30,11 @@ pub(crate) use editor_tab::document_for_tab;
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) use editor_tab::tab_surface_for_document;
 pub(crate) use editor_tab::{
-    EditorTabState, TabTaskState, TextBuffer, TextContentState, TextSurfaceCache,
-    create_tab_from_byte_document, create_text_tab, default_expanded_paths, document_for_owned_tab,
-    empty_editor_text, empty_tree_rows, text_surface_from_text, value_search_result_for_doc,
-    value_tree_rows_for_doc, value_tree_rows_for_doc_with_expansion,
+    EditorTabState, TabTaskState, TextBuffer, TextContentState, TextRangeReplacement,
+    TextSurfaceCache, create_tab_from_byte_document, create_text_tab, create_text_tab_from_surface,
+    default_expanded_paths, document_for_owned_tab, empty_editor_text, empty_tree_rows,
+    text_surface_from_text, value_search_result_for_doc, value_tree_rows_for_doc,
+    value_tree_rows_for_doc_with_expansion,
 };
 #[cfg(target_arch = "wasm32")]
 pub(crate) use file_paths::normalize_display_path;
@@ -62,10 +63,13 @@ pub(crate) use rton_inspector::{
     read_rton_varint, rton_tag_info, string_mode_label,
 };
 pub(crate) use text_history::{
-    TextHistory, can_record_text_undo, push_text_past_snapshot, push_text_redo_snapshot,
-    push_text_undo_snapshot,
+    TextHistory, TextHistoryEntry, TextRangeHistoryEntry, can_record_text_undo,
+    push_text_past_range, push_text_past_snapshot, push_text_redo_range, push_text_redo_snapshot,
+    push_text_undo_range, push_text_undo_snapshot,
 };
-pub(crate) use text_locator::{locate_value_path_in_text, offset_to_text_position};
+#[cfg(test)]
+pub(crate) use text_locator::offset_to_text_position;
+pub(crate) use text_locator::{TextPosition, locate_value_path_in_text};
 #[cfg(test)]
 pub(crate) use text_search::replace_all_text_matches;
 pub(crate) use text_search::{
@@ -82,10 +86,10 @@ pub(crate) use toolbar_layout::{
 };
 pub(crate) use virtual_scroll::{
     FILE_LIST_DEFAULT_VIEWPORT_HEIGHT, FILE_LIST_ROW_HEIGHT, FileListVirtualScroll,
-    HEX_DEFAULT_VIEWPORT_HEIGHT, TEXT_DEFAULT_VIEWPORT_HEIGHT, TEXT_MAX_VIEWPORT_ROWS,
-    TEXT_MAX_VIRTUAL_SCROLL_HEIGHT, TEXT_ROW_HEIGHT, VALUE_SEARCH_DEFAULT_VIEWPORT_HEIGHT,
-    VALUE_TREE_DEFAULT_VIEWPORT_HEIGHT, ValueTreeVirtualScroll, file_list_virtual_row_top,
-    file_list_virtual_scroll, hex_scroll_top_for_row, hex_virtual_row_top, hex_virtual_scroll,
+    HEX_DEFAULT_VIEWPORT_HEIGHT, TEXT_DEFAULT_VIEWPORT_HEIGHT, TEXT_ROW_HEIGHT,
+    VALUE_SEARCH_DEFAULT_VIEWPORT_HEIGHT, VALUE_TREE_DEFAULT_VIEWPORT_HEIGHT,
+    ValueTreeVirtualScroll, file_list_virtual_row_top, file_list_virtual_scroll,
+    hex_scroll_top_for_row, hex_virtual_row_top, hex_virtual_scroll,
     measured_file_list_viewport_height, measured_hex_viewport_height,
     measured_text_viewport_height, measured_value_search_viewport_height,
     measured_value_tree_viewport_height, text_virtual_row_top, text_virtual_scroll,

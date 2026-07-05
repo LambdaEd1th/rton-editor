@@ -49,6 +49,15 @@ pub(crate) struct TextBuffer {
     pub(crate) line_offsets: Arc<[usize]>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TextRangeReplacement {
+    pub(crate) start_line: usize,
+    pub(crate) start_column_utf16: usize,
+    pub(crate) end_line: usize,
+    pub(crate) end_column_utf16: usize,
+    pub(crate) replacement: String,
+}
+
 impl TextBuffer {
     pub(crate) fn new(text: String) -> Self {
         let line_offsets = Arc::<[usize]>::from(text_line_offsets(&text));
@@ -196,13 +205,22 @@ pub(crate) fn create_text_tab(
     text: String,
     format: TextFormat,
 ) -> Result<EditorTabState, CoreError> {
+    let surface = text_surface_from_text(text, format);
+    Ok(create_text_tab_from_surface(id, file_name, surface, format))
+}
+
+pub(crate) fn create_text_tab_from_surface(
+    id: usize,
+    file_name: String,
+    surface: TabSurface,
+    format: TextFormat,
+) -> EditorTabState {
     let mode = match format {
         TextFormat::Json => EditorMode::Json,
         TextFormat::Yaml => EditorMode::Yaml,
         TextFormat::Toml => EditorMode::Toml,
     };
-    let surface = text_surface_from_text(text, format);
-    Ok(EditorTabState {
+    EditorTabState {
         id,
         file_name,
         tree_rows: empty_tree_rows(),
@@ -224,7 +242,7 @@ pub(crate) fn create_text_tab(
         expanded_paths: default_expanded_paths(),
         text_cache: Vec::new(),
         dirty: false,
-    })
+    }
 }
 
 pub(crate) fn empty_tree_rows() -> Arc<TreeRows> {

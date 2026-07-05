@@ -87,6 +87,35 @@ pub struct WorkerRtonSizeResponse {
     pub byte_len: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkerTextSurfaceRequest {
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>,
+    pub format: TextFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkerTextSurfaceResponse {
+    pub surface: WorkerSurface,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkerOpenTextRequest {
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>,
+    pub format: TextFormat,
+    pub search_query: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkerOpenTextResponse {
+    pub doc: Option<DecodedDocument>,
+    pub surface: WorkerSurface,
+    pub tree_rows: TreeRows,
+    pub search_result: Option<ValueSearchResult>,
+    pub search_query: String,
+}
+
 pub fn perform_worker_mode_switch(
     request: WorkerModeSwitchRequest,
 ) -> Result<WorkerModeSwitchResponse> {
@@ -140,6 +169,59 @@ pub fn perform_worker_rton_size(request: WorkerRtonSizeRequest) -> Result<Worker
     let bytes = encode_rton_bytes(&doc.value, request.encode_options)?;
     Ok(WorkerRtonSizeResponse {
         byte_len: bytes.len(),
+    })
+}
+
+pub fn perform_worker_text_surface(
+    request: WorkerTextSurfaceRequest,
+) -> Result<WorkerTextSurfaceResponse> {
+    let text = String::from_utf8_lossy(&request.bytes).to_string();
+    let line_offsets = text_line_offsets(&text);
+    let byte_count = text.len();
+    let line_count = line_offsets.len();
+    Ok(WorkerTextSurfaceResponse {
+        surface: WorkerSurface::Text {
+            text,
+            line_offsets,
+            byte_count,
+            line_count,
+            format: request.format,
+        },
+    })
+}
+
+pub fn perform_worker_open_text(request: WorkerOpenTextRequest) -> Result<WorkerOpenTextResponse> {
+    let text = String::from_utf8_lossy(&request.bytes).to_string();
+    let line_offsets = text_line_offsets(&text);
+    let byte_count = text.len();
+    let line_count = line_offsets.len();
+    let parsed = parse_text(&text, request.format).ok();
+    let tree_rows = parsed
+        .as_ref()
+        .map(|doc| {
+            flatten_expanded_value_tree(&doc.value, &default_worker_expanded_paths(), usize::MAX)
+        })
+        .unwrap_or_else(|| TreeRows {
+            rows: Vec::new(),
+            truncated: false,
+        });
+    let search_result = parsed.as_ref().and_then(|doc| {
+        (!request.search_query.trim().is_empty())
+            .then(|| search_value_tree(&doc.value, &request.search_query, usize::MAX))
+    });
+
+    Ok(WorkerOpenTextResponse {
+        doc: parsed,
+        surface: WorkerSurface::Text {
+            text,
+            line_offsets,
+            byte_count,
+            line_count,
+            format: request.format,
+        },
+        tree_rows,
+        search_result,
+        search_query: request.search_query,
     })
 }
 

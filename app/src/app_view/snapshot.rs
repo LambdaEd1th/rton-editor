@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::components::{FileListItem, FileSelection, TabHeader, file_item_matches_search};
 use crate::domain::{
-    EditorTabState, TextSearchMatch, find_text_search_result, text_search_status_text,
+    EditorTabState, TextBuffer, TextSearchMatch, find_text_search_result, text_search_status_text,
 };
 use crate::file_import::{LoadedFileState, build_file_list_items};
 use crate::i18n::I18n;
@@ -15,13 +15,16 @@ pub(super) struct EditorSearchSnapshot {
 }
 
 pub(super) fn editor_search_snapshot(
-    text: &str,
+    text_buffer: Option<&TextBuffer>,
     query: &str,
     case_sensitive: bool,
     match_index: usize,
     i18n: I18n,
 ) -> EditorSearchSnapshot {
-    let result = find_text_search_result(text, query, case_sensitive);
+    let Some(text_buffer) = text_buffer else {
+        return empty_editor_search_snapshot(query, i18n);
+    };
+    let result = find_text_search_result(text_buffer.text.as_ref(), query, case_sensitive);
     let matches = result.matches;
     let match_count = matches.len();
     let current_index = if match_count == 0 {
@@ -37,6 +40,15 @@ pub(super) fn editor_search_snapshot(
         match_count,
         status_text,
         controls_disabled: match_count == 0,
+    }
+}
+
+pub(super) fn empty_editor_search_snapshot(query: &str, i18n: I18n) -> EditorSearchSnapshot {
+    EditorSearchSnapshot {
+        matches: Vec::new(),
+        match_count: 0,
+        status_text: text_search_status_text(query, 0, None, false, i18n),
+        controls_disabled: true,
     }
 }
 

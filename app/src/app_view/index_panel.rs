@@ -23,6 +23,7 @@ pub(super) fn IndexPanel(
     on_search_change: EventHandler<String>,
     on_select_path: EventHandler<String>,
     on_toggle_path: EventHandler<String>,
+    suppress_resize_observer: bool,
 ) -> Element {
     rsx! {
         aside { class: "rton-side-panel rton-side-panel-right",
@@ -74,7 +75,8 @@ pub(super) fn IndexPanel(
                     ValueSearchResults {
                         result: search_result,
                         i18n,
-                        on_select: on_select_path
+                        on_select: on_select_path,
+                        suppress_resize_observer
                     }
                 } else if active_doc.is_some() {
                     ValueTree {
@@ -83,7 +85,8 @@ pub(super) fn IndexPanel(
                         selected_path,
                         i18n,
                         on_select: on_select_path,
-                        on_toggle: on_toggle_path
+                        on_toggle: on_toggle_path,
+                        suppress_resize_observer
                     }
                 } else {
                     div { class: "empty-state",

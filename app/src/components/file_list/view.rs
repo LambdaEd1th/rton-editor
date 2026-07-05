@@ -24,9 +24,11 @@ pub(crate) fn FileList(
     on_remove_path: EventHandler<String>,
     on_toggle_selected: EventHandler<(String, bool)>,
     on_toggle_path: EventHandler<(String, bool)>,
+    suppress_resize_observer: bool,
 ) -> Element {
     let mut scroll_top = use_signal(|| 0_f64);
     let viewport_height = use_signal(|| FILE_LIST_DEFAULT_VIEWPORT_HEIGHT);
+    let mut mounted = use_signal(|| None::<MountedEvent>);
     let mut collapsed_paths = use_signal(HashSet::<String>::new);
     let collapsed_snapshot = collapsed_paths.read().clone();
     let rows = build_file_list_rows(&items, &selection, &collapsed_snapshot);
@@ -37,18 +39,38 @@ pub(crate) fn FileList(
         file_list_virtual_scroll(row_count, scroll_top_snapshot, viewport_height_snapshot);
     let visible_rows = file_list_visible_window(&rows, virtual_scroll, scroll_top_snapshot);
 
+    use_effect(use_reactive(&suppress_resize_observer, move |suppressed| {
+        if suppressed {
+            return;
+        }
+        let Some(event) = mounted.peek().clone() else {
+            return;
+        };
+        spawn(async move {
+            if let Ok(rect) = event.get_client_rect().await {
+                update_file_list_viewport_height(viewport_height, rect.height());
+            }
+        });
+    }));
+
     rsx! {
         div {
             class: "file-list",
             role: "tree",
             aria_label: i18n.t("file-list-loaded-files"),
             style: "--file-list-row-height: {FILE_LIST_ROW_HEIGHT}px",
-            onmounted: move |event| async move {
-                if let Ok(rect) = event.get_client_rect().await {
+            onmounted: move |event| {
+                mounted.set(Some(event.clone()));
+                async move {
+                    if let Ok(rect) = event.get_client_rect().await {
                     update_file_list_viewport_height(viewport_height, rect.height());
+                    }
                 }
             },
             onresize: move |event| {
+                if suppress_resize_observer {
+                    return;
+                }
                 if let Ok(size) = event.get_content_box_size() {
                     update_file_list_viewport_height(viewport_height, size.height);
                 }

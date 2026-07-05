@@ -64,6 +64,53 @@ pub(super) fn normalize_selection(
     (anchor != focus).then_some(ByteSelection { anchor, focus })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct HexSelectionTarget {
+    pub(super) offset: usize,
+    pub(super) length: usize,
+    pub(super) explicit_selection: bool,
+}
+
+impl HexSelectionTarget {
+    pub(super) fn new(offset: usize, length: usize, explicit_selection: bool) -> Self {
+        Self {
+            offset,
+            length,
+            explicit_selection,
+        }
+    }
+}
+
+pub(super) fn hex_selection_target(
+    selection: Option<ByteSelection>,
+    bytes_len: usize,
+    fallback_offset: usize,
+) -> Option<HexSelectionTarget> {
+    if bytes_len == 0 {
+        return None;
+    }
+    if let Some(selection) = normalize_selection(selection, bytes_len) {
+        let start = selection.anchor.min(selection.focus);
+        let end = selection.anchor.max(selection.focus);
+        return Some(HexSelectionTarget::new(start, end - start + 1, true));
+    }
+    Some(HexSelectionTarget::new(
+        fallback_offset.min(bytes_len - 1),
+        1,
+        false,
+    ))
+}
+
+pub(super) fn hex_target_bytes(
+    bytes: &ByteDocument,
+    target: HexSelectionTarget,
+) -> Option<Vec<u8>> {
+    if target.length == 0 {
+        return None;
+    }
+    bytes.range_to_vec(target.offset, target.offset.saturating_add(target.length))
+}
+
 pub(super) fn to_offset_hex(offset: usize, width: usize) -> String {
     format!("{offset:0width$X}")
 }
@@ -160,45 +207,48 @@ pub(super) fn commit_hex_replace_span(
     );
 }
 
-pub(super) fn commit_hex_set_or_insert(
+pub(super) fn commit_hex_replace_target(
     current: &ByteDocument,
-    offset: usize,
+    target: HexSelectionTarget,
+    values: Vec<u8>,
+    targets: HexCommitTargets,
+) {
+    commit_hex_replace_span(current, target.offset, target.length, values, targets);
+}
+
+pub(super) fn commit_hex_write_target(
+    current: &ByteDocument,
+    target: HexSelectionTarget,
     values: Vec<u8>,
     insert_mode: bool,
     targets: HexCommitTargets,
 ) {
-    let offset = offset.min(current.len());
-    let delete_length = if insert_mode {
+    let delete_length = if insert_mode && !target.explicit_selection {
         0
+    } else if target.explicit_selection {
+        target
+            .length
+            .min(current.len().saturating_sub(target.offset))
     } else {
-        values.len().min(current.len().saturating_sub(offset))
+        values
+            .len()
+            .min(current.len().saturating_sub(target.offset))
     };
-    let focus = offset + values.len().saturating_sub(1);
-    commit_hex_edit(
-        current,
-        HexEdit {
-            offset,
-            delete_length,
-            insert: values,
-        },
-        focus,
-        targets,
-    );
+    commit_hex_replace_span(current, target.offset, delete_length, values, targets);
 }
 
-pub(super) fn commit_hex_replace_selection(
+pub(super) fn commit_hex_clear_target(
     current: &ByteDocument,
-    bytes_len: usize,
-    values: Vec<u8>,
+    target: HexSelectionTarget,
+    insert_mode: bool,
     targets: HexCommitTargets,
-) -> bool {
-    let Some(selection) = normalize_selection(*targets.selection_range.read(), bytes_len) else {
-        return false;
+) {
+    let values = if insert_mode {
+        Vec::new()
+    } else {
+        vec![0; target.length]
     };
-    let start = selection.anchor.min(selection.focus);
-    let length = selection.anchor.max(selection.focus) - start + 1;
-    commit_hex_replace_span(current, start, length, values, targets);
-    true
+    commit_hex_replace_target(current, target, values, targets);
 }
 
 pub(super) fn set_hex_focus(

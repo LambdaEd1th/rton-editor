@@ -3,9 +3,12 @@ use crate::app_constants::{
     DESKTOP_WINDOW_DEFAULT_HEIGHT, DESKTOP_WINDOW_DEFAULT_WIDTH, DESKTOP_WINDOW_MIN_HEIGHT,
     DESKTOP_WINDOW_MIN_WIDTH,
 };
+use crate::domain::ThemePreference;
 
 #[cfg(target_arch = "wasm32")]
 const LOCALE_PREFERENCE_KEY: &str = "rton-editor-locale";
+#[cfg(target_arch = "wasm32")]
+const THEME_PREFERENCE_KEY: &str = "rton-editor-theme";
 #[cfg(target_arch = "wasm32")]
 const TOOLBAR_LAYOUT_KEY: &str = "rton-editor-toolbar-layout";
 #[cfg(target_arch = "wasm32")]
@@ -70,6 +73,48 @@ pub fn save_locale_preference(locale_code: &str) -> Result<(), String> {
         .ok_or_else(|| "localStorage is unavailable".to_string())?;
     storage
         .set_item(LOCALE_PREFERENCE_KEY, locale_code)
+        .map_err(|error| format!("{error:?}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_theme_preference() -> ThemePreference {
+    let Some(path) = theme_preference_path() else {
+        return ThemePreference::System;
+    };
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|value| ThemePreference::from_code(value.trim()))
+        .unwrap_or(ThemePreference::System)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn read_theme_preference() -> ThemePreference {
+    web_sys::window()
+        .and_then(|window| window.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(THEME_PREFERENCE_KEY).ok().flatten())
+        .map(|value| ThemePreference::from_code(value.trim()))
+        .unwrap_or(ThemePreference::System)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn save_theme_preference(theme: ThemePreference) -> Result<(), String> {
+    let path = theme_preference_path()
+        .ok_or_else(|| "could not resolve theme preference path".to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(path, theme.code()).map_err(|error| error.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn save_theme_preference(theme: ThemePreference) -> Result<(), String> {
+    let window = web_sys::window().ok_or_else(|| "window is unavailable".to_string())?;
+    let storage = window
+        .local_storage()
+        .map_err(|error| format!("{error:?}"))?
+        .ok_or_else(|| "localStorage is unavailable".to_string())?;
+    storage
+        .set_item(THEME_PREFERENCE_KEY, theme.code())
         .map_err(|error| format!("{error:?}"))
 }
 
@@ -198,6 +243,11 @@ pub fn system_locale() -> Option<String> {
 #[cfg(not(target_arch = "wasm32"))]
 fn locale_preference_path() -> Option<std::path::PathBuf> {
     Some(app_config_dir()?.join("locale"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn theme_preference_path() -> Option<std::path::PathBuf> {
+    Some(app_config_dir()?.join("theme"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

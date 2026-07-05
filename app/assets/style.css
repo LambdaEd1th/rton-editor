@@ -51,6 +51,7 @@
   --color-code-meta: #d9a441;
   --color-editor-active-line: rgba(148, 163, 184, 0.075);
   --color-editor-selection: rgba(75, 120, 210, 0.3);
+  --color-editor-selection-solid: #29456f;
   --color-editor-search-match: rgba(126, 148, 235, 0.18);
   --color-editor-search-match-border: rgba(162, 181, 255, 0.3);
   --color-editor-search-current: rgba(126, 148, 235, 0.3);
@@ -115,8 +116,9 @@
   --color-code-operator: #4b5563;
   --color-code-punctuation: #687386;
   --color-code-meta: #9a6700;
-  --color-editor-active-line: rgba(30, 64, 92, 0.045);
+  --color-editor-active-line: rgba(30, 64, 92, 0.075);
   --color-editor-selection: rgba(37, 99, 235, 0.12);
+  --color-editor-selection-solid: #d9e7ff;
   --color-editor-search-match: rgba(99, 102, 241, 0.14);
   --color-editor-search-match-border: rgba(79, 70, 229, 0.24);
   --color-editor-search-current: rgba(99, 102, 241, 0.24);
@@ -175,8 +177,9 @@
     --color-code-operator: #4b5563;
     --color-code-punctuation: #687386;
     --color-code-meta: #9a6700;
-    --color-editor-active-line: rgba(30, 64, 92, 0.045);
+    --color-editor-active-line: rgba(30, 64, 92, 0.075);
     --color-editor-selection: rgba(37, 99, 235, 0.12);
+    --color-editor-selection-solid: #d9e7ff;
     --color-editor-search-match: rgba(99, 102, 241, 0.14);
     --color-editor-search-match-border: rgba(79, 70, 229, 0.24);
     --color-editor-search-current: rgba(99, 102, 241, 0.24);
@@ -455,18 +458,174 @@ textarea:focus-visible {
 }
 
 .rton-theme-select {
+  min-width: 8ch;
+  max-width: min(36ch, 70vw);
+}
+
+.rton-inline-select-shell {
+  display: inline-flex;
+}
+
+.rton-inline-select-control {
+  appearance: none;
+  display: inline-flex;
+  position: relative;
+  height: 24px;
+  min-width: 78px;
+  max-width: 100%;
+  align-items: center;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 5px;
+  background: var(--color-control);
+  color: var(--color-text-strong);
+  cursor: pointer;
+  font: inherit;
+  user-select: none;
+  vertical-align: middle;
+}
+
+.rton-inline-select-control:hover {
+  border-color: var(--color-border-stronger);
+  background: var(--color-control-hover);
+}
+
+.rton-inline-select-control:focus-visible {
+  border-color: var(--color-accent-border);
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.rton-inline-select-control.is-open {
+  border-color: var(--color-accent-border);
+  background: var(--color-control-hover);
+}
+
+.rton-inline-select-toolbar {
   height: 28px;
   min-width: 8ch;
   max-width: min(36ch, 70vw);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius);
-  background: var(--color-control);
-  color: var(--color-text-strong);
-  padding: 0 26px 0 8px;
 }
 
-.rton-theme-select:hover {
-  border-color: var(--color-border-stronger);
+.rton-inline-select-value {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding: 0 0 0 7px;
+  font-size: 11px;
+  line-height: 22px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.rton-inline-select-caret {
+  display: inline-flex;
+  width: 20px;
+  height: 100%;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-size: 16px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.rton-inline-select-toolbar .rton-inline-select-value {
+  padding-left: 8px;
+  font-size: 13px;
+  line-height: 26px;
+}
+
+.rton-inline-select-toolbar .rton-inline-select-caret {
+  width: 24px;
+  flex-basis: 24px;
+  font-size: 20px;
+}
+
+.rton-inline-select-backdrop {
+  position: fixed;
+  z-index: 128;
+  inset: 0;
+  background: transparent;
+}
+
+.rton-inline-select-menu {
+  position: fixed;
+  z-index: 129;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  background: var(--color-surface-raised);
+  box-shadow: 0 10px 26px var(--color-shadow);
+}
+
+.rton-inline-select-menu-toolbar {
+  min-width: 138px;
+}
+
+.rton-inline-select-menu button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-strong);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rton-inline-select-menu-toolbar button {
+  max-width: 100%;
+  min-height: 28px;
+  align-items: flex-start;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.rton-inline-select-menu button:hover,
+.rton-inline-select-menu button:focus-visible {
+  background: var(--color-control-hover);
+}
+
+.rton-inline-select-menu button:focus-visible {
+  outline: none;
+}
+
+.rton-inline-select-menu button.active {
+  color: var(--color-accent-text);
+  background: var(--color-control-active);
+}
+
+.rton-inline-select-menu-toolbar button.active {
+  background: transparent;
+}
+
+.rton-inline-select-menu-toolbar button.active:hover,
+.rton-inline-select-menu-toolbar button.active:focus-visible {
   background: var(--color-control-hover);
 }
 
@@ -719,11 +878,22 @@ textarea:focus-visible {
   --rton-tab-strip-overlap: calc(var(--rton-side-panel-tab-overlap) + var(--rton-tab-scrollbar-gutter));
   --rton-panel-handle-width: 6px;
   display: flex;
+  position: relative;
   min-width: 0;
   min-height: 0;
   flex: 1;
   flex-direction: column;
   overflow: hidden;
+}
+
+.rton-workspace-shell.resizing-panel {
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rton-workspace-shell.resizing-panel * {
+  cursor: col-resize !important;
 }
 
 .rton-workspace-shell.dragging-files {
@@ -898,6 +1068,7 @@ textarea:focus-visible {
   flex-direction: column;
   overflow: hidden;
   background: var(--color-surface);
+  contain: layout paint;
 }
 
 .rton-side-panel-left {
@@ -908,7 +1079,6 @@ textarea:focus-visible {
 .rton-side-panel-right {
   grid-column: 5;
   border-left: 1px solid var(--color-border);
-  container-type: inline-size;
 }
 
 .rton-resize-handle {
@@ -953,6 +1123,7 @@ textarea:focus-visible {
   min-height: 0;
   flex-direction: column;
   background: var(--color-stage);
+  contain: layout paint;
 }
 
 .editor-surface {
@@ -965,6 +1136,7 @@ textarea:focus-visible {
 
 .virtual-text-preview {
   display: flex;
+  position: relative;
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
@@ -977,6 +1149,7 @@ textarea:focus-visible {
   flex: 1 1 auto;
   overflow: auto;
   position: relative;
+  contain: layout paint;
   color: var(--color-text-strong);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 13px;
@@ -1017,6 +1190,7 @@ textarea:focus-visible {
   position: sticky;
   left: 0;
   z-index: 1;
+  display: block;
   height: 100%;
   border-right: 1px solid var(--color-border);
   background: var(--color-stage);
@@ -1024,7 +1198,15 @@ textarea:focus-visible {
   font-variant-numeric: tabular-nums;
   padding: 0 10px 0 14px;
   text-align: right;
+  pointer-events: none;
   user-select: none;
+  -webkit-user-select: none;
+}
+
+.virtual-text-line-number::before {
+  content: attr(data-line-number);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .virtual-text-line,
@@ -1038,7 +1220,17 @@ textarea:focus-visible {
 .virtual-text-line-view {
   min-width: 36ch;
   cursor: text;
-  user-select: text;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.virtual-text-preview.has-logical-selection .virtual-text-line-view {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.virtual-text-line-view.active-line {
+  background: var(--color-editor-active-line);
 }
 
 .virtual-text-preview.wrap .virtual-text-line-view {
@@ -1053,40 +1245,128 @@ textarea:focus-visible {
   background: color-mix(in srgb, var(--color-focus) 8%, transparent);
 }
 
+.virtual-text-preview.has-logical-selection .virtual-text-line-view:focus {
+  background: transparent;
+}
+
 .virtual-text-line-view:empty::after {
   content: " ";
 }
 
-.virtual-text-line-editor {
-  appearance: none;
-  display: block;
-  width: 100%;
-  min-width: 36ch;
-  height: var(--virtual-text-row-height);
+.virtual-text-selection-fragment {
+  background: var(--color-editor-selection-solid);
+}
+
+.virtual-text-caret {
+  display: inline-block;
+  width: 1px;
+  height: 1.15em;
+  animation: virtual-text-caret-blink 1.15s ease-in-out infinite;
+  margin-left: -1px;
+  background: var(--color-accent);
+  pointer-events: none;
+  vertical-align: -0.16em;
+}
+
+@keyframes virtual-text-caret-blink {
+  0%,
+  42% {
+    opacity: 1;
+  }
+
+  58%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .virtual-text-caret {
+    animation: none;
+  }
+}
+
+.virtual-text-input-sink {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: -1;
+  width: 1px;
+  height: 1px;
   border: 0;
-  border-radius: 0;
+  opacity: 0;
   outline: none;
+  overflow: hidden;
+  padding: 0;
+  resize: none;
+}
+
+.virtual-text-context-menu,
+.rton-hex-context-menu {
+  position: absolute;
+  z-index: 120;
+  display: grid;
+  min-width: 144px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  background: var(--color-surface-raised);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+  padding: 4px;
+}
+
+.virtual-text-context-menu button,
+.rton-hex-context-menu button {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  border: 0;
+  border-radius: 4px;
   background: transparent;
-  box-shadow: none;
-  color: inherit;
+  color: var(--color-text-strong);
   font: inherit;
-  line-height: var(--virtual-text-row-height);
-  padding: 0 18px 0 12px;
+  font-size: 13px;
+  padding: 0 10px;
+  text-align: left;
 }
 
-.virtual-text-preview.wrap .virtual-text-line-editor {
-  min-width: 0;
+.virtual-text-context-menu button:hover:not(:disabled),
+.rton-hex-context-menu button:hover:not(:disabled) {
+  background: var(--color-control-hover);
 }
 
-.virtual-text-line-editor:focus,
-.virtual-text-line-editor:focus-visible {
-  outline: none;
-  outline-offset: 0;
-  background: var(--color-editor-active-line);
-  box-shadow: none;
+.virtual-text-context-menu button:disabled,
+.rton-hex-context-menu button:disabled {
+  color: var(--color-text-subtle);
+  cursor: not-allowed;
+}
+
+.virtual-text-context-menu-separator,
+.rton-hex-context-menu-separator {
+  height: 1px;
+  margin: 4px;
+  background: var(--color-border);
+}
+
+.rton-hex-context-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 119;
+  background: transparent;
+}
+
+.rton-hex-context-close-sink {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .rton-hex-editor {
+  position: relative;
   display: flex;
   width: 100%;
   height: 100%;
@@ -1102,6 +1382,21 @@ textarea:focus-visible {
 
 .rton-hex-editor:focus {
   outline: none;
+}
+
+.rton-hex-input-sink {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: -1;
+  width: 1px;
+  height: 1px;
+  border: 0;
+  opacity: 0;
+  outline: none;
+  overflow: hidden;
+  padding: 0;
+  resize: none;
 }
 
 .rton-hex-summary {
@@ -1156,6 +1451,7 @@ textarea:focus-visible {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
+  contain: layout paint;
 }
 
 .rton-hex-header,
@@ -1181,6 +1477,7 @@ textarea:focus-visible {
   min-height: 0;
   flex: 1 1 auto;
   overflow: auto;
+  contain: layout paint;
 }
 
 .rton-hex-virtual-space {
@@ -1774,6 +2071,7 @@ textarea:focus-visible {
   min-height: 0;
   overflow: auto;
   padding: 8px;
+  contain: layout paint;
 }
 
 .file-list-virtual-space {
@@ -2367,6 +2665,7 @@ textarea:focus-visible {
   min-height: 0;
   flex: 1;
   flex-direction: column;
+  contain: layout paint;
 }
 
 .rton-index-header {
@@ -2450,6 +2749,7 @@ textarea:focus-visible {
   min-height: 0;
   flex: 1;
   overflow: auto;
+  contain: layout paint;
   padding: 10px 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
@@ -2493,6 +2793,7 @@ textarea:focus-visible {
   min-height: 0;
   flex: 1;
   overflow: auto;
+  contain: layout paint;
 }
 
 .value-search-virtual-space {

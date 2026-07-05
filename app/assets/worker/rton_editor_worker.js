@@ -16,6 +16,18 @@ export function rton_worker_mode_switch(request) {
  * @param {any} request
  * @returns {any}
  */
+export function rton_worker_open_text(request) {
+    const ret = wasm.rton_worker_open_text(request);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {any} request
+ * @returns {any}
+ */
 export function rton_worker_parse(request) {
     const ret = wasm.rton_worker_parse(request);
     if (ret[2]) {
@@ -30,6 +42,18 @@ export function rton_worker_parse(request) {
  */
 export function rton_worker_rton_size(request) {
     const ret = wasm.rton_worker_rton_size(request);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {any} request
+ * @returns {any}
+ */
+export function rton_worker_text_surface(request) {
+    const ret = wasm.rton_worker_text_surface(request);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

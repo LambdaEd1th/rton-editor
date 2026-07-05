@@ -7,7 +7,6 @@ use rton_editor_core::{TextFormat, WorkerDocumentSource, WorkerRtonSizeRequest};
 
 #[cfg(target_arch = "wasm32")]
 use crate::app_i18n::{bump_i18n_revision, initial_locale, load_i18n_sources_async};
-use crate::components::{TextJumpTarget, scroll_text_editor_to_text_target};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::domain::document_for_owned_tab;
 use crate::domain::{EditorMode, EditorTabState};
@@ -21,49 +20,11 @@ use crate::platform::run_cpu_task;
 use crate::platform::run_rton_size_worker;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct TextSearchJump {
-    pub(super) line: usize,
-    pub(super) column: usize,
-    pub(super) selection_end_column: usize,
-    pub(super) line_count: usize,
-    pub(super) focus_token: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct RtonOutputSize {
     pub(super) tab_id: usize,
     pub(super) compact: bool,
     pub(super) encrypted: bool,
     pub(super) byte_count: usize,
-}
-
-pub(super) fn use_text_jump_effect(text_jump_target: Signal<Option<TextJumpTarget>>) {
-    use_effect(move || {
-        if let Some(target) = *text_jump_target.read() {
-            scroll_text_editor_to_text_target(target);
-        }
-    });
-}
-
-pub(super) fn use_text_search_jump_effect(target: Option<TextSearchJump>) {
-    let mut last_focus_token = use_signal(|| 0_u64);
-    use_effect(use_reactive(&(target,), move |(target,)| {
-        let Some(target) = target else {
-            return;
-        };
-        let focus = target.focus_token > 0 && target.focus_token != *last_focus_token.peek();
-        if focus {
-            last_focus_token.set(target.focus_token);
-        }
-        scroll_text_editor_to_text_target(TextJumpTarget {
-            id: 0,
-            line: target.line,
-            column: target.column,
-            selection_end_column: target.selection_end_column,
-            line_count: target.line_count,
-            focus,
-        });
-    }));
 }
 
 pub(super) fn use_rton_output_size_effect(

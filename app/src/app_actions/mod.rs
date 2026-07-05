@@ -14,7 +14,7 @@ pub(crate) use document::{
 };
 pub(crate) use editing::{
     redo_active_edit, tab_can_redo, tab_can_undo, undo_active_edit, update_active_hex_edits,
-    update_active_text_line,
+    update_active_text_range,
 };
 pub(crate) use export::{export_active_rton, export_active_text};
 pub(crate) use file_selection::{

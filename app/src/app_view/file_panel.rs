@@ -27,6 +27,7 @@ pub(super) fn FilePanel(
     on_remove_path: EventHandler<String>,
     on_toggle_selected: EventHandler<(String, bool)>,
     on_toggle_path: EventHandler<(String, bool)>,
+    suppress_resize_observer: bool,
 ) -> Element {
     rsx! {
         aside { class: "rton-side-panel rton-side-panel-left",
@@ -99,7 +100,8 @@ pub(super) fn FilePanel(
                 on_remove,
                 on_remove_path,
                 on_toggle_selected,
-                on_toggle_path
+                on_toggle_path,
+                suppress_resize_observer
             }
         }
     }

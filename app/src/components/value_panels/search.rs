@@ -13,9 +13,11 @@ pub(crate) fn ValueSearchResults(
     result: Arc<ValueSearchResult>,
     i18n: I18n,
     on_select: EventHandler<String>,
+    suppress_resize_observer: bool,
 ) -> Element {
     let mut scroll_top = use_signal(|| 0_f64);
     let viewport_height = use_signal(|| VALUE_SEARCH_DEFAULT_VIEWPORT_HEIGHT);
+    let mut mounted = use_signal(|| None::<MountedEvent>);
     let match_count = result.matches.len();
     let scroll_top_snapshot = *scroll_top.read();
     let viewport_height_snapshot = *viewport_height.read();
@@ -38,6 +40,20 @@ pub(crate) fn ValueSearchResults(
             )
         })
         .collect::<Vec<_>>();
+
+    use_effect(use_reactive(&suppress_resize_observer, move |suppressed| {
+        if suppressed {
+            return;
+        }
+        let Some(event) = mounted.peek().clone() else {
+            return;
+        };
+        spawn(async move {
+            if let Ok(rect) = event.get_client_rect().await {
+                update_value_search_viewport_height(viewport_height, rect.height());
+            }
+        });
+    }));
 
     if result.matches.is_empty() {
         let message = if result.done {
@@ -84,12 +100,18 @@ pub(crate) fn ValueSearchResults(
             }
             div {
                 class: "value-search-scroll",
-                onmounted: move |event| async move {
-                    if let Ok(rect) = event.get_client_rect().await {
-                        update_value_search_viewport_height(viewport_height, rect.height());
+                onmounted: move |event| {
+                    mounted.set(Some(event.clone()));
+                    async move {
+                        if let Ok(rect) = event.get_client_rect().await {
+                            update_value_search_viewport_height(viewport_height, rect.height());
+                        }
                     }
                 },
                 onresize: move |event| {
+                    if suppress_resize_observer {
+                        return;
+                    }
                     if let Ok(size) = event.get_content_box_size() {
                         update_value_search_viewport_height(viewport_height, size.height);
                     }

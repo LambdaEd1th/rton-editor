@@ -15,7 +15,7 @@ pub(crate) use file_list::{FileTreeNode, build_file_tree, collect_file_tree_keys
 pub(crate) use hex_editor::{HexEditor, HexJumpTarget};
 pub(crate) use panels::{MetaItem, PanelHeader, PanelResizeDrag, PanelResizeHandle, PanelSide};
 pub(crate) use tab_strip::{TabHeader, TabStrip};
-pub(crate) use text_editor::{TextJumpTarget, scroll_text_editor_to_text_target};
+pub(crate) use text_editor::TextJumpTarget;
 pub(crate) use toolbar::ToolbarGroup;
 pub(crate) use ui_helpers::{button_class, clamp_panel_width, lucide_icon, mode_button_class};
 #[cfg(test)]

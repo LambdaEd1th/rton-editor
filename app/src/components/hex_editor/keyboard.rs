@@ -3,8 +3,8 @@ use dioxus::prelude::*;
 use crate::domain::{ByteDocument, HexEdit};
 
 use super::logic::{
-    HexCommitTargets, commit_hex_replace_selection, commit_hex_replace_span,
-    commit_hex_set_or_insert, is_hex_key, key_to_latin1_byte, set_hex_focus,
+    HexCommitTargets, HexSelectionTarget, commit_hex_clear_target, commit_hex_write_target,
+    hex_selection_target, is_hex_key, key_to_latin1_byte, set_hex_focus,
 };
 use super::state::{ByteSelection, HEX_BYTES_PER_ROW, HexPane, PendingHexEdit};
 
@@ -35,6 +35,11 @@ pub(super) fn handle_hex_key(
         selection_range,
         selected_offset,
     };
+    let Some(active_target) =
+        hex_selection_target(normalized_selection, bytes_len, safe_selected_offset)
+    else {
+        return;
+    };
     let key = event.key().to_string();
     let modifiers = event.modifiers();
     let ctrl_or_meta = modifiers.ctrl() || modifiers.meta();
@@ -45,14 +50,14 @@ pub(super) fn handle_hex_key(
         on_search_visible_change.call(true);
         return;
     }
-    if ctrl_or_meta && key.eq_ignore_ascii_case("z") {
-        event.prevent_default();
-        on_undo.call(());
-        return;
-    }
     if ctrl_or_meta && (key.eq_ignore_ascii_case("y") || (shift && key.eq_ignore_ascii_case("z"))) {
         event.prevent_default();
         on_redo.call(());
+        return;
+    }
+    if ctrl_or_meta && key.eq_ignore_ascii_case("z") {
+        event.prevent_default();
+        on_undo.call(());
         return;
     }
 
@@ -133,46 +138,20 @@ pub(super) fn handle_hex_key(
         "Backspace" => {
             event.prevent_default();
             pending_hex_edit.set(None);
-            if commit_hex_replace_selection(bytes, bytes_len, Vec::new(), commit_targets) {
-                return;
-            }
-            if *insert_mode.read() {
-                if safe_selected_offset > 0 {
-                    commit_hex_replace_span(
-                        bytes,
-                        safe_selected_offset - 1,
-                        1,
-                        Vec::new(),
-                        commit_targets,
-                    );
+            let target = if *insert_mode.read() && !active_target.explicit_selection {
+                if safe_selected_offset == 0 {
+                    return;
                 }
+                HexSelectionTarget::new(safe_selected_offset - 1, 1, false)
             } else {
-                commit_hex_set_or_insert(
-                    bytes,
-                    safe_selected_offset,
-                    vec![0],
-                    false,
-                    commit_targets,
-                );
-            }
+                active_target
+            };
+            commit_hex_clear_target(bytes, target, *insert_mode.read(), commit_targets);
         }
         "Delete" => {
             event.prevent_default();
             pending_hex_edit.set(None);
-            if commit_hex_replace_selection(bytes, bytes_len, Vec::new(), commit_targets) {
-                return;
-            }
-            if *insert_mode.read() {
-                commit_hex_replace_span(bytes, safe_selected_offset, 1, Vec::new(), commit_targets);
-            } else {
-                commit_hex_set_or_insert(
-                    bytes,
-                    safe_selected_offset,
-                    vec![0],
-                    false,
-                    commit_targets,
-                );
-            }
+            commit_hex_clear_target(bytes, active_target, *insert_mode.read(), commit_targets);
         }
         "Escape" => {
             pending_hex_edit.set(None);
@@ -186,25 +165,20 @@ pub(super) fn handle_hex_key(
                 if let Some(value) = key_to_latin1_byte(&key) {
                     event.prevent_default();
                     pending_hex_edit.set(None);
-                    if !commit_hex_replace_selection(bytes, bytes_len, vec![value], commit_targets)
-                    {
-                        commit_hex_set_or_insert(
-                            bytes,
-                            safe_selected_offset,
-                            vec![value],
-                            *insert_mode.read(),
-                            commit_targets,
-                        );
-                    }
+                    commit_hex_write_target(
+                        bytes,
+                        active_target,
+                        vec![value],
+                        *insert_mode.read(),
+                        commit_targets,
+                    );
                 }
                 return;
             }
 
             if is_hex_key(&key) {
                 event.prevent_default();
-                let edit_offset = normalized_selection
-                    .map(|selection| selection.anchor.min(selection.focus))
-                    .unwrap_or(safe_selected_offset);
+                let edit_offset = active_target.offset;
                 let current_text = pending_hex_edit
                     .read()
                     .as_ref()
@@ -216,29 +190,21 @@ pub(super) fn handle_hex_key(
                     pending_hex_edit.set(Some(PendingHexEdit {
                         offset: edit_offset,
                         text: next_text,
-                        delete_length: normalized_selection.map(|selection| {
-                            selection.anchor.max(selection.focus)
-                                - selection.anchor.min(selection.focus)
-                                + 1
-                        }),
+                        delete_length: active_target
+                            .explicit_selection
+                            .then_some(active_target.length),
                     }));
                     selected_offset.set(edit_offset);
                     return;
                 }
                 let value = u8::from_str_radix(&next_text[..2], 16).unwrap_or_default();
-                if let Some(selection) = normalized_selection {
-                    let start = selection.anchor.min(selection.focus);
-                    let length = selection.anchor.max(selection.focus) - start + 1;
-                    commit_hex_replace_span(bytes, start, length, vec![value], commit_targets);
-                } else {
-                    commit_hex_set_or_insert(
-                        bytes,
-                        edit_offset,
-                        vec![value],
-                        *insert_mode.read(),
-                        commit_targets,
-                    );
-                }
+                commit_hex_write_target(
+                    bytes,
+                    active_target,
+                    vec![value],
+                    *insert_mode.read(),
+                    commit_targets,
+                );
                 pending_hex_edit.set(None);
             }
         }

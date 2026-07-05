@@ -9,8 +9,8 @@ use crate::components::{
     PanelResizeDrag, PanelResizeHandle, PanelSide, TabStrip, file_path_matches_scope,
 };
 use crate::domain::{
-    BatchExportMode, ByteDocument, EditorMode, HexEdit, Status, TextSearchMatch, Tone,
-    default_expanded_paths, empty_tree_rows, offset_to_text_position,
+    BatchExportMode, ByteDocument, EditorMode, HexEdit, Status, TextBuffer, TextRangeReplacement,
+    TextSearchMatch, Tone, default_expanded_paths, empty_tree_rows,
 };
 use crate::file_import::*;
 
@@ -26,19 +26,18 @@ mod workspace_drop;
 use editor_stage::{EditorStage, EditorStageTab};
 #[cfg(target_arch = "wasm32")]
 use effects::use_web_i18n_loader;
-use effects::{
-    RtonOutputSize, TextSearchJump, use_rton_output_size_effect, use_text_jump_effect,
-    use_text_search_jump_effect,
-};
+use effects::{RtonOutputSize, use_rton_output_size_effect};
 use file_panel::FilePanel;
 use handlers::{
-    finish_workspace_drag_state, start_tab_drag_if_needed, start_toolbar_group_drag_state,
-    update_panel_resize_width, update_tab_drop_marker_for_drag,
-    update_toolbar_drop_marker_for_drag,
+    commit_panel_resize_width, finish_workspace_drag_state, start_tab_drag_if_needed,
+    start_toolbar_group_drag_state, start_workspace_panel_resize_preview,
+    update_tab_drop_marker_for_drag, update_toolbar_drop_marker_for_drag,
 };
 use index_panel::IndexPanel;
 use signals::{AppSignals, use_app_signals};
-use snapshot::{editor_search_snapshot, file_panel_snapshot, tab_headers_for_tabs};
+use snapshot::{
+    editor_search_snapshot, empty_editor_search_snapshot, file_panel_snapshot, tab_headers_for_tabs,
+};
 use toolbar_view::ToolbarView;
 use workspace_drop::handle_workspace_file_drop;
 const APP_CSS: &str = include_str!("../../assets/style.css");
@@ -88,8 +87,6 @@ pub(crate) fn App() -> Element {
         mut status,
     } = use_app_signals(initial_locale_snapshot);
 
-    use_text_jump_effect(text_jump_target);
-
     #[cfg(target_arch = "wasm32")]
     use_web_i18n_loader(
         locale,
@@ -124,7 +121,7 @@ pub(crate) fn App() -> Element {
         expanded_paths_snapshot,
         can_undo_snapshot,
         can_redo_snapshot,
-        active_editor_text_snapshot,
+        active_text_buffer_snapshot,
         tab_headers,
     ) = {
         let tabs_snapshot = tabs.read();
@@ -168,8 +165,7 @@ pub(crate) fn App() -> Element {
             active_tab_snapshot.is_some_and(tab_can_redo),
             active_tab_snapshot
                 .filter(|tab| tab.mode.text_format().is_some())
-                .map(|tab| tab.editor_text.to_string())
-                .unwrap_or_default(),
+                .and_then(|tab| tab.text_buffer.clone()),
             tab_headers_for_tabs(&tabs_snapshot),
         )
     };
@@ -196,31 +192,34 @@ pub(crate) fn App() -> Element {
     let editor_search_case_sensitive_snapshot = *editor_search_case_sensitive.read();
     let editor_search_match_index_snapshot = *editor_search_match_index.read();
     let editor_search_focus_token_snapshot = *editor_search_focus_token.read();
-    let editor_search = editor_search_snapshot(
-        &active_editor_text_snapshot,
-        &editor_search_text_snapshot,
-        editor_search_case_sensitive_snapshot,
-        editor_search_match_index_snapshot,
-        i18n,
-    );
-    let text_search_jump =
-        if editor_search_panel_visible_snapshot && !editor_search_text_snapshot.is_empty() {
-            let line_count = active_stage_tab_snapshot
-                .as_ref()
-                .and_then(|tab| tab.text_buffer.as_ref())
-                .map(|buffer| buffer.line_count())
-                .unwrap_or_else(|| text_line_count(&active_editor_text_snapshot));
-            current_text_search_jump(
-                &active_editor_text_snapshot,
-                line_count,
-                &editor_search.matches,
-                editor_search_match_index_snapshot,
-                editor_search_focus_token_snapshot,
-            )
-        } else {
-            None
-        };
-    use_text_search_jump_effect(text_search_jump);
+    let should_search_editor_text =
+        editor_search_panel_visible_snapshot && !editor_search_text_snapshot.is_empty();
+    let editor_search = if should_search_editor_text {
+        editor_search_snapshot(
+            active_text_buffer_snapshot.as_deref(),
+            &editor_search_text_snapshot,
+            editor_search_case_sensitive_snapshot,
+            editor_search_match_index_snapshot,
+            i18n,
+        )
+    } else {
+        empty_editor_search_snapshot(&editor_search_text_snapshot, i18n)
+    };
+    let text_search_jump = if should_search_editor_text {
+        active_text_buffer_snapshot
+            .as_deref()
+            .and_then(|text_buffer| {
+                current_text_search_jump(
+                    text_buffer,
+                    &editor_search.matches,
+                    editor_search_match_index_snapshot,
+                    editor_search_focus_token_snapshot,
+                )
+            })
+    } else {
+        None
+    };
+    let active_text_jump_target = text_search_jump.or(*text_jump_target.read());
     let file_search_snapshot = file_search_query.read().clone();
     let file_selection_snapshot = file_selection.read().clone();
     let file_panel_memo = use_memo(move || {
@@ -245,6 +244,7 @@ pub(crate) fn App() -> Element {
     let left_panel_width_snapshot = *left_panel_width.read();
     let right_panel_width_snapshot = *right_panel_width.read();
     let panel_resize_drag_snapshot = *panel_resize_drag.read();
+    let panel_resizing_snapshot = panel_resize_drag_snapshot.is_some();
     let dragged_tab_id_snapshot = *dragged_tab_id.read();
     let tab_drop_marker_snapshot = *tab_drop_marker.read();
     let toolbar_rows_snapshot = toolbar_rows.read().clone();
@@ -396,8 +396,8 @@ pub(crate) fn App() -> Element {
         update_active_hex_edits(edits, tabs, active_tab_id);
     };
 
-    let update_virtual_text_line = move |(line_index, replacement): (usize, String)| {
-        update_active_text_line(line_index, replacement, tabs, active_tab_id);
+    let update_virtual_text_range = move |replacement: TextRangeReplacement| {
+        update_active_text_range(replacement, tabs, active_tab_id);
     };
 
     let undo_edit: EventHandler<()> = EventHandler::new(move |_| {
@@ -477,18 +477,16 @@ pub(crate) fn App() -> Element {
 
     let handle_panel_resize_start = move |drag: PanelResizeDrag| {
         panel_resize_drag.set(Some(drag));
+        start_workspace_panel_resize_preview(drag);
     };
 
-    let handle_workspace_mouse_move = move |event: MouseEvent| {
-        update_panel_resize_width(
+    let handle_workspace_mouse_up = move |event: MouseEvent| {
+        commit_panel_resize_width(
             event,
             panel_resize_drag,
             left_panel_width,
             right_panel_width,
         );
-    };
-
-    let handle_workspace_mouse_up = move |_| {
         finish_workspace_drag_state(
             panel_resize_drag,
             tabs,
@@ -572,7 +570,6 @@ pub(crate) fn App() -> Element {
         main {
             class: theme_preference_snapshot.shell_class(),
             onmouseup: handle_workspace_mouse_up,
-            onmousemove: handle_workspace_mouse_move,
             ToolbarView {
                 i18n,
                 toolbar_rows_snapshot: toolbar_rows_snapshot.clone(),
@@ -668,7 +665,8 @@ pub(crate) fn App() -> Element {
                         on_remove: EventHandler::new(remove_file_list_item),
                         on_remove_path: EventHandler::new(remove_file_list_path),
                         on_toggle_selected: EventHandler::new(toggle_selected_file),
-                        on_toggle_path: EventHandler::new(toggle_selected_path)
+                        on_toggle_path: EventHandler::new(toggle_selected_path),
+                        suppress_resize_observer: panel_resizing_snapshot
                     }
 
                     PanelResizeHandle {
@@ -684,6 +682,7 @@ pub(crate) fn App() -> Element {
                         active_tab: active_stage_tab_snapshot.clone(),
                         active_byte_doc: active_byte_doc_snapshot.clone(),
                         hex_jump_target: *hex_jump_target.read(),
+                        text_jump_target: active_text_jump_target,
                         line_wrapping: line_wrapping_snapshot,
                         editor_search_panel_visible: editor_search_panel_visible_snapshot,
                         editor_search_text: editor_search_text_snapshot.clone(),
@@ -692,7 +691,7 @@ pub(crate) fn App() -> Element {
                         editor_search_controls_disabled: editor_search.controls_disabled,
                         editor_search_status_text: editor_search.status_text.clone(),
                         on_hex_change: EventHandler::new(update_hex_edit),
-                        on_virtual_text_line_change: EventHandler::new(update_virtual_text_line),
+                        on_virtual_text_range_replace: EventHandler::new(update_virtual_text_range),
                         on_undo: undo_edit,
                         on_redo: redo_edit,
                         on_search_visible_change: EventHandler::new(move |visible| editor_search_panel_visible.set(visible)),
@@ -710,7 +709,8 @@ pub(crate) fn App() -> Element {
                         on_replace_current: EventHandler::new(replace_current_editor_match),
                         on_replace_all: EventHandler::new(replace_all_editor_matches),
                         on_find_key: EventHandler::new(handle_editor_search_key),
-                        on_replace_key: EventHandler::new(handle_editor_replace_key)
+                        on_replace_key: EventHandler::new(handle_editor_replace_key),
+                        suppress_resize_observer: panel_resizing_snapshot
                     }
 
                     PanelResizeHandle {
@@ -743,7 +743,8 @@ pub(crate) fn App() -> Element {
                             hex_jump_target,
                             status,
                             i18n,
-                        ))
+                        )),
+                        suppress_resize_observer: panel_resizing_snapshot
                     }
                 }
             }
@@ -867,26 +868,26 @@ fn format_panel_bytes(bytes: usize) -> String {
 }
 
 fn current_text_search_jump(
-    text: &str,
-    line_count: usize,
+    buffer: &TextBuffer,
     matches: &[TextSearchMatch],
     match_index: usize,
     focus_token: u64,
-) -> Option<TextSearchJump> {
+) -> Option<crate::components::TextJumpTarget> {
     let match_ = matches.get(match_index.min(matches.len().saturating_sub(1)))?;
-    let position = offset_to_text_position(text, match_.start);
-    let end_position = offset_to_text_position(text, match_.end);
+    let position = offset_to_text_buffer_position(buffer, match_.start);
+    let end_position = offset_to_text_buffer_position(buffer, match_.end);
     let selection_end_column = if end_position.line == position.line {
         end_position.column
     } else {
         position.column
     };
-    Some(TextSearchJump {
+    Some(crate::components::TextJumpTarget {
+        id: focus_token,
         line: position.line,
         column: position.column,
         selection_end_column,
-        line_count,
-        focus_token,
+        line_count: buffer.line_count(),
+        focus: focus_token > 0,
     })
 }
 
@@ -897,14 +898,18 @@ fn request_text_search_focus(match_count: usize, mut focus_token: Signal<u64>) {
     }
 }
 
-fn text_line_count(text: &str) -> usize {
-    if text.is_empty() {
-        return 0;
+fn offset_to_text_buffer_position(
+    buffer: &TextBuffer,
+    offset: usize,
+) -> crate::domain::TextPosition {
+    let bounded_offset = offset.min(buffer.text.len());
+    let line_index = buffer
+        .line_offsets
+        .partition_point(|line_offset| *line_offset <= bounded_offset)
+        .saturating_sub(1);
+    let line_start = buffer.line_offsets.get(line_index).copied().unwrap_or(0);
+    crate::domain::TextPosition {
+        line: line_index + 1,
+        column: bounded_offset.saturating_sub(line_start),
     }
-
-    text.bytes()
-        .enumerate()
-        .filter(|(index, byte)| *byte == b'\n' && index + 1 < text.len())
-        .count()
-        + 1
 }

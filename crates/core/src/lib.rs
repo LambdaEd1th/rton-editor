@@ -42,8 +42,10 @@ pub use value_tree::{
 };
 pub use worker_protocol::{
     WorkerDocumentSource, WorkerEditorMode, WorkerModeSwitchRequest, WorkerModeSwitchResponse,
-    WorkerParseRequest, WorkerParseResponse, WorkerRtonSizeRequest, WorkerRtonSizeResponse,
-    WorkerSurface, perform_worker_mode_switch, perform_worker_parse, perform_worker_rton_size,
+    WorkerOpenTextRequest, WorkerOpenTextResponse, WorkerParseRequest, WorkerParseResponse,
+    WorkerRtonSizeRequest, WorkerRtonSizeResponse, WorkerSurface, WorkerTextSurfaceRequest,
+    WorkerTextSurfaceResponse, perform_worker_mode_switch, perform_worker_open_text,
+    perform_worker_parse, perform_worker_rton_size, perform_worker_text_surface,
 };
 
 #[cfg(test)]

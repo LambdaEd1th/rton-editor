@@ -17,9 +17,11 @@ pub(crate) fn ValueTree(
     i18n: I18n,
     on_select: EventHandler<String>,
     on_toggle: EventHandler<String>,
+    suppress_resize_observer: bool,
 ) -> Element {
     let mut scroll_top = use_signal(|| 0_f64);
     let viewport_height = use_signal(|| VALUE_TREE_DEFAULT_VIEWPORT_HEIGHT);
+    let mut mounted = use_signal(|| None::<MountedEvent>);
     let row_count = rows.rows.len();
     let scroll_top_snapshot = *scroll_top.read();
     let viewport_height_snapshot = *viewport_height.read();
@@ -27,15 +29,35 @@ pub(crate) fn ValueTree(
         value_tree_virtual_scroll(row_count, scroll_top_snapshot, viewport_height_snapshot);
     let visible_rows = value_tree_visible_window(&rows.rows, virtual_scroll, scroll_top_snapshot);
 
+    use_effect(use_reactive(&suppress_resize_observer, move |suppressed| {
+        if suppressed {
+            return;
+        }
+        let Some(event) = mounted.peek().clone() else {
+            return;
+        };
+        spawn(async move {
+            if let Ok(rect) = event.get_client_rect().await {
+                update_value_tree_viewport_height(viewport_height, rect.height());
+            }
+        });
+    }));
+
     rsx! {
         div {
             class: "value-tree",
-            onmounted: move |event| async move {
-                if let Ok(rect) = event.get_client_rect().await {
-                    update_value_tree_viewport_height(viewport_height, rect.height());
+            onmounted: move |event| {
+                mounted.set(Some(event.clone()));
+                async move {
+                    if let Ok(rect) = event.get_client_rect().await {
+                        update_value_tree_viewport_height(viewport_height, rect.height());
+                    }
                 }
             },
             onresize: move |event| {
+                if suppress_resize_observer {
+                    return;
+                }
                 if let Ok(size) = event.get_content_box_size() {
                     update_value_tree_viewport_height(viewport_height, size.height);
                 }
