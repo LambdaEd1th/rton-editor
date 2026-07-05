@@ -4,6 +4,26 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+authors = ["LambdaEd1th"]
+description = "Editor for RTON resources"
+
+[package.metadata.bundle]
+name = "RTON Editor"
+identifier = "io.github.lambdaed1th.rton_editor"
+category = "public.app-category.developer-tools"
+short_description = "Editor for RTON resources"
+long_description = """
+A cross-platform editor for converting, inspecting, and editing RTON resources.
+"""
+
+[package.metadata.bundle.bin.rton-editor]
+name = "RTON Editor"
+identifier = "io.github.lambdaed1th.rton_editor"
+category = "public.app-category.developer-tools"
+short_description = "Editor for RTON resources"
+long_description = """
+A cross-platform editor for converting, inspecting, and editing RTON resources.
+"""
 
 [[bin]]
 name = "rton-editor"

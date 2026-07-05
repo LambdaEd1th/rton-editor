@@ -720,13 +720,14 @@ textarea:focus-visible {
   z-index: 80;
   inset: 0;
   display: grid;
-  place-items: start center;
+  place-items: center;
   background: color-mix(in srgb, var(--color-bg) 58%, transparent);
-  padding: min(14vh, 96px) 16px 16px;
+  padding: 16px;
 }
 
 .rton-about-dialog {
   width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
   overflow: hidden;
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
@@ -735,12 +736,18 @@ textarea:focus-visible {
   color: var(--color-text);
 }
 
+.rton-about-dialog.dragging {
+  user-select: none;
+}
+
 .rton-about-header {
   display: flex;
   min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  cursor: move;
+  user-select: none;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface-soft);
   padding: 12px 12px 12px 14px;
@@ -785,6 +792,7 @@ textarea:focus-visible {
   border-radius: var(--radius);
   background: var(--color-control);
   color: var(--color-text-muted);
+  cursor: pointer;
 }
 
 .rton-about-close:hover {
