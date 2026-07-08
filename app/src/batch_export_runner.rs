@@ -129,7 +129,7 @@ struct BatchExportJob {
 }
 
 enum BatchDocumentSource {
-    Tab(EditorTabState),
+    Tab(Box<EditorTabState>),
     LoadedFile(LoadedFileState),
 }
 
@@ -175,7 +175,7 @@ fn resolve_batch_export_source(
     if let Some(tab_id) = tab_id
         && let Some(tab) = tabs.iter().find(|tab| tab.id == tab_id).cloned()
     {
-        return Ok(BatchDocumentSource::Tab(tab));
+        return Ok(BatchDocumentSource::Tab(Box::new(tab)));
     }
 
     if let Some(file_id) = file_id {
@@ -317,7 +317,7 @@ fn process_batch_export_job_sync(
     let result = (|| {
         let doc = match job.source {
             Ok(BatchDocumentSource::Tab(tab)) => {
-                document_for_owned_tab(tab).map_err(|error| error.to_string())?
+                document_for_owned_tab(*tab).map_err(|error| error.to_string())?
             }
             Ok(BatchDocumentSource::LoadedFile(file)) => {
                 document_from_loaded_file_sync(&file).map_err(OpenTabError::message)?
@@ -359,7 +359,7 @@ async fn resolve_batch_export_document(
     source: Result<BatchDocumentSource, String>,
 ) -> Result<Arc<DecodedDocument>, String> {
     match source {
-        Ok(BatchDocumentSource::Tab(tab)) => document_for_batch_tab(tab).await,
+        Ok(BatchDocumentSource::Tab(tab)) => document_for_batch_tab(*tab).await,
         Ok(BatchDocumentSource::LoadedFile(file)) => {
             let tab = create_tab_from_loaded_file(0, &file)
                 .await

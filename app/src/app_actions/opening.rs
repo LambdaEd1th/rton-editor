@@ -56,6 +56,7 @@ pub(crate) fn activate_tab_by_id(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn open_loaded_file_by_id(
     file_id: usize,
     loaded_files: Signal<Vec<LoadedFileState>>,

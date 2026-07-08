@@ -702,9 +702,8 @@ fn document_metadata_for_doc_sync(
         });
         DocumentMetadata {
             tree_rows: tree_rows.join().expect("value tree task panicked"),
-            search_result: search_result
-                .map(|task| task.join().expect("value search task panicked"))
-                .flatten(),
+                search_result: search_result
+                .and_then(|task| task.join().expect("value search task panicked")),
         }
     })
 }
@@ -738,8 +737,7 @@ async fn mode_switch_parts_for_doc(
                 DocumentMetadata {
                     tree_rows: tree_rows.join().expect("value tree task panicked"),
                     search_result: search_result
-                        .map(|task| task.join().expect("value search task panicked"))
-                        .flatten(),
+                        .and_then(|task| task.join().expect("value search task panicked")),
                 },
             ))
         })
