@@ -10,8 +10,7 @@ use rton_editor_core::{
 fn to_js_value<T: Serialize + ?Sized>(value: &T) -> Result<JsValue, JsValue> {
     value
         .serialize(
-            &serde_wasm_bindgen::Serializer::new()
-                .serialize_large_number_types_as_bigints(true),
+            &serde_wasm_bindgen::Serializer::new().serialize_large_number_types_as_bigints(true),
         )
         .map_err(|error| JsValue::from_str(&error.to_string()))
 }
