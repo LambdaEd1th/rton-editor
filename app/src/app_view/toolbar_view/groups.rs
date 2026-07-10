@@ -1,7 +1,6 @@
 mod about;
 mod edit;
 mod file;
-mod format;
 mod preferences;
 mod rton_export;
 mod text_export;
@@ -17,7 +16,6 @@ use crate::i18n::{I18n, LanguageOption, Locale};
 use about::AboutToolbarGroup;
 use edit::EditToolbarGroup;
 use file::FileToolbarGroup;
-use format::FormatToolbarGroup;
 use preferences::PreferencesToolbarGroup;
 use rton_export::RtonExportToolbarGroup;
 use text_export::TextExportToolbarGroup;
@@ -51,7 +49,6 @@ pub(super) fn ToolbarGroupContent(
     load_sample: EventHandler<()>,
     undo_edit: EventHandler<()>,
     redo_edit: EventHandler<()>,
-    switch_mode: EventHandler<EditorMode>,
     on_compact_change: EventHandler<bool>,
     export_text: EventHandler<TextFormat>,
     parse_current: EventHandler<()>,
@@ -78,12 +75,6 @@ pub(super) fn ToolbarGroupContent(
                 can_redo_snapshot,
                 undo_edit,
                 redo_edit
-            }
-        },
-        ToolbarGroupId::Format => rsx! {
-            FormatToolbarGroup {
-                active_mode_snapshot,
-                switch_mode
             }
         },
         ToolbarGroupId::TextExport => rsx! {

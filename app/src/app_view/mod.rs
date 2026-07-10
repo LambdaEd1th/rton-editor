@@ -625,7 +625,6 @@ pub(crate) fn App() -> Element {
                 load_sample: EventHandler::new(move |_| load_sample(())),
                 undo_edit,
                 redo_edit,
-                switch_mode: EventHandler::new(switch_mode),
                 on_compact_change: EventHandler::new(handle_compact_change),
                 export_text: EventHandler::new(export_text),
                 parse_current: EventHandler::new(move |_| parse_current(())),
@@ -748,6 +747,7 @@ pub(crate) fn App() -> Element {
                         active_file_label: active_file_label.clone(),
                         input_value: input_value_label,
                         output_value: output_value_label.clone(),
+                        active_mode: active_mode_snapshot,
                         active_doc: active_doc_snapshot.clone(),
                         active_search: active_search.clone(),
                         selected_path: selected_path_snapshot.clone(),
@@ -756,6 +756,7 @@ pub(crate) fn App() -> Element {
                         value_search_result,
                         on_search_change: EventHandler::new(move |query: String| update_active_search(query, tabs, active_tab_id)),
                         on_toggle_path: EventHandler::new(move |path: String| toggle_active_tree_path(path, tabs, active_tab_id)),
+                        on_switch_mode: EventHandler::new(switch_mode),
                         on_select_path: EventHandler::new(move |path: String| navigate_to_value_path(
                             path,
                             tabs,

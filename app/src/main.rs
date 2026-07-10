@@ -50,6 +50,7 @@ fn launch_desktop_app() {
         ));
     let desktop_config = Config::new()
         .with_window(window)
+        .with_menu(None)
         .with_on_window(move |window, _| {
             on_window_scale_factor.set(window.scale_factor());
             window.set_inner_size(LogicalSize::new(size.width as f64, size.height as f64));

@@ -15,11 +15,12 @@ use crate::domain::document_for_owned_tab;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::domain::tab_surface_for_document;
 #[cfg(target_arch = "wasm32")]
-use crate::domain::{ByteDocument, TextBuffer, TextContentState, empty_editor_text};
+use crate::domain::{ByteDocument, TextBuffer, TextContentState};
 use crate::domain::{
-    EditorMode, EditorTabState, HexHistory, Status, TabTaskState, TextHistory, TextSurfaceCache,
-    Tone, default_expanded_paths, locate_rton_value_offset, locate_value_path_in_text,
-    value_search_result_for_doc, value_tree_rows_for_doc, value_tree_rows_for_doc_with_expansion,
+    EditorMode, EditorTabState, HexHistory, RtonSurfaceCache, Status, TabTaskState, TextHistory,
+    TextSurfaceCache, Tone, default_expanded_paths, empty_editor_text, locate_rton_value_offset,
+    locate_value_path_in_text, value_search_result_for_doc, value_tree_rows_for_doc,
+    value_tree_rows_for_doc_with_expansion,
 };
 use crate::i18n::I18n;
 use crate::platform::{run_cpu_task, sleep_ms};
@@ -161,42 +162,26 @@ pub(crate) fn switch_active_mode(
     }
 
     let tab_id = tab.id;
-    if let Some((doc, cache, was_dirty)) = cached_text_surface(&tab, next_mode) {
+    if let Some(surface) = cached_mode_surface(&tab, next_mode, encode_options) {
         let task_id = tab.task_generation.saturating_add(1);
-        let search_query = tab.search_query.clone();
         update_tab(tabs, tab_id, |active| {
+            cache_current_surface(active, encode_options);
             active.task_generation = task_id;
-            active.task_state = Some(TabTaskState {
-                id: task_id,
-                target_mode: next_mode,
-            });
+            apply_cached_mode_surface(active, next_mode, surface);
         });
         status.set(Status::new(
             i18n.t_args(
-                "status-switching",
+                "status-switched-cached",
                 &[("mode", next_mode.label().to_string())],
             ),
-            Tone::Warn,
+            Tone::Info,
         ));
-        spawn(async move {
-            let result = cached_mode_switch_payload(doc, cache, was_dirty, search_query).await;
-            if !task_is_current(tabs, tab_id, task_id) {
-                return;
-            }
-            apply_mode_switch_payload(tabs, tab_id, next_mode, result);
-            status.set(Status::new(
-                i18n.t_args(
-                    "status-switched-cached",
-                    &[("mode", next_mode.label().to_string())],
-                ),
-                Tone::Info,
-            ));
-        });
         return;
     }
 
     let task_id = tab.task_generation.saturating_add(1);
     update_tab(tabs, tab_id, |active| {
+        cache_current_surface(active, encode_options);
         active.task_generation = task_id;
         active.task_state = Some(TabTaskState {
             id: task_id,
@@ -552,17 +537,75 @@ pub(crate) fn toggle_active_tree_path(
     });
 }
 
-fn cached_text_surface(
+fn cached_mode_surface(
     tab: &EditorTabState,
     next_mode: EditorMode,
-) -> Option<(Arc<DecodedDocument>, TextSurfaceCache, bool)> {
-    let doc = tab.doc.clone()?;
-    let cache = tab
-        .text_cache
-        .iter()
-        .find(|cache| cache.mode == next_mode)
-        .cloned()?;
-    Some((doc, cache, tab.dirty))
+    encode_options: EncodeOptions,
+) -> Option<crate::domain::editor_tab::TabSurface> {
+    tab.doc.as_ref()?;
+    match next_mode {
+        EditorMode::RtonHex => {
+            let cache = tab.rton_cache.as_ref()?;
+            if cache.encode_options != encode_options {
+                return None;
+            }
+            Some(crate::domain::editor_tab::TabSurface {
+                byte_doc: Some(cache.byte_doc.clone()),
+                editor_text: empty_editor_text(),
+                text_buffer: None,
+                text_state: crate::domain::TextContentState::None,
+            })
+        }
+        EditorMode::Json | EditorMode::Yaml | EditorMode::Toml => {
+            let cache = tab
+                .text_cache
+                .iter()
+                .find(|cache| cache.mode == next_mode)?;
+            Some(crate::domain::editor_tab::TabSurface {
+                byte_doc: None,
+                editor_text: cache.editor_text.clone(),
+                text_buffer: cache.text_buffer.clone(),
+                text_state: cache.text_state.clone(),
+            })
+        }
+    }
+}
+
+fn cache_current_surface(tab: &mut EditorTabState, encode_options: EncodeOptions) {
+    match tab.mode {
+        EditorMode::RtonHex => {
+            if let Some(byte_doc) = tab.byte_doc.clone() {
+                tab.rton_cache = Some(RtonSurfaceCache {
+                    encode_options,
+                    byte_doc,
+                });
+            }
+        }
+        EditorMode::Json | EditorMode::Yaml | EditorMode::Toml => {
+            tab.text_cache.retain(|cache| cache.mode != tab.mode);
+            tab.text_cache.push(TextSurfaceCache {
+                mode: tab.mode,
+                editor_text: tab.editor_text.clone(),
+                text_buffer: tab.text_buffer.clone(),
+                text_state: tab.text_state.clone(),
+            });
+        }
+    }
+}
+
+fn apply_cached_mode_surface(
+    tab: &mut EditorTabState,
+    next_mode: EditorMode,
+    surface: crate::domain::editor_tab::TabSurface,
+) {
+    tab.byte_doc = surface.byte_doc;
+    tab.editor_text = surface.editor_text;
+    tab.text_buffer = surface.text_buffer;
+    tab.text_state = surface.text_state;
+    tab.mode = next_mode;
+    tab.text_history = TextHistory::default();
+    tab.hex_history = HexHistory::default();
+    tab.task_state = None;
 }
 
 async fn parse_tab_payload(tab: EditorTabState) -> Result<ParsePayload, String> {
@@ -597,28 +640,6 @@ async fn parse_payload_for_doc(doc: Arc<DecodedDocument>, search_query: String) 
         tree_rows: metadata.tree_rows,
         search_result: metadata.search_result,
         search_query,
-    }
-}
-
-async fn cached_mode_switch_payload(
-    doc: Arc<DecodedDocument>,
-    cache: TextSurfaceCache,
-    was_dirty: bool,
-    search_query: String,
-) -> ModeSwitchPayload {
-    let metadata = document_metadata_for_doc(doc.clone(), search_query.clone()).await;
-    ModeSwitchPayload {
-        doc,
-        surface: crate::domain::editor_tab::TabSurface {
-            byte_doc: None,
-            editor_text: cache.editor_text,
-            text_buffer: cache.text_buffer,
-            text_state: cache.text_state,
-        },
-        tree_rows: metadata.tree_rows,
-        search_result: metadata.search_result,
-        search_query,
-        was_dirty,
     }
 }
 
@@ -955,4 +976,46 @@ fn apply_mode_switch_payload_with_selection(
             });
         }
     });
+}
+
+#[cfg(test)]
+mod surface_cache_tests {
+    use super::*;
+    use crate::domain::{ByteDocument, create_text_tab};
+    use rton_editor_core::{BinaryEncoding, TextFormat, parse_text};
+
+    #[test]
+    fn rton_surface_cache_restores_only_matching_encoding() {
+        let mut tab = create_text_tab(
+            1,
+            "sample.json".to_string(),
+            r#"{"value":1}"#.to_string(),
+            TextFormat::Json,
+        )
+        .expect("text tab");
+        tab.doc = Some(Arc::new(
+            parse_text(tab.editor_text.as_ref(), TextFormat::Json).expect("parsed document"),
+        ));
+        tab.mode = EditorMode::RtonHex;
+        tab.byte_doc = Some(ByteDocument::from_vec(b"RTON".to_vec()));
+        tab.editor_text = empty_editor_text();
+        tab.text_buffer = None;
+        tab.text_state = crate::domain::TextContentState::None;
+
+        let standard = EncodeOptions {
+            encoding: BinaryEncoding::Standard,
+            encrypted: false,
+        };
+        cache_current_surface(&mut tab, standard);
+
+        let restored =
+            cached_mode_surface(&tab, EditorMode::RtonHex, standard).expect("standard RTON cache");
+        assert_eq!(restored.byte_doc.expect("cached bytes").to_vec(), b"RTON");
+
+        let compact = EncodeOptions {
+            encoding: BinaryEncoding::Compact,
+            encrypted: false,
+        };
+        assert!(cached_mode_surface(&tab, EditorMode::RtonHex, compact).is_none());
+    }
 }

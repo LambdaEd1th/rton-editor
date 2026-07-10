@@ -30,11 +30,3 @@ pub(crate) fn button_class(variant: &'static str) -> &'static str {
         _ => "rton-button secondary",
     }
 }
-
-pub(crate) fn mode_button_class(active: bool) -> &'static str {
-    if active {
-        "rton-mode-button active"
-    } else {
-        "rton-mode-button"
-    }
-}

@@ -68,7 +68,12 @@ pub(crate) fn PanelResizeHandle(
 }
 
 #[component]
-pub(crate) fn PanelHeader(icon: Element, title: String, subtitle: String) -> Element {
+pub(crate) fn PanelHeader(
+    icon: Element,
+    title: String,
+    subtitle: String,
+    children: Element,
+) -> Element {
     rsx! {
         header { class: "panel-header",
             div { class: "panel-header-main",
@@ -78,6 +83,7 @@ pub(crate) fn PanelHeader(icon: Element, title: String, subtitle: String) -> Ele
                 }
                 p { "{subtitle}" }
             }
+            div { class: "panel-header-below", {children} }
         }
     }
 }

@@ -74,6 +74,7 @@ fn tab(id: usize) -> EditorTabState {
         search_generation: 0,
         expanded_paths: default_expanded_paths(),
         text_cache: Vec::new(),
+        rton_cache: None,
         dirty: false,
     }
 }

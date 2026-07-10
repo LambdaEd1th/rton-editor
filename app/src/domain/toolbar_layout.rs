@@ -25,7 +25,6 @@ pub(crate) struct DropMarker<T> {
 pub(crate) enum ToolbarGroupId {
     File,
     Edit,
-    Format,
     TextExport,
     RtonExport,
     Preferences,
@@ -37,7 +36,6 @@ impl ToolbarGroupId {
         match self {
             ToolbarGroupId::File => "file",
             ToolbarGroupId::Edit => "edit",
-            ToolbarGroupId::Format => "format",
             ToolbarGroupId::TextExport => "textExport",
             ToolbarGroupId::RtonExport => "rtonExport",
             ToolbarGroupId::Preferences => "prefs",
@@ -49,7 +47,6 @@ impl ToolbarGroupId {
         match code {
             "file" => Some(ToolbarGroupId::File),
             "edit" => Some(ToolbarGroupId::Edit),
-            "format" => Some(ToolbarGroupId::Format),
             "textExport" => Some(ToolbarGroupId::TextExport),
             "rtonExport" => Some(ToolbarGroupId::RtonExport),
             "prefs" => Some(ToolbarGroupId::Preferences),
@@ -62,7 +59,6 @@ impl ToolbarGroupId {
         match self {
             ToolbarGroupId::File => "toolbar-group-file",
             ToolbarGroupId::Edit => "toolbar-group-edit",
-            ToolbarGroupId::Format => "toolbar-group-format",
             ToolbarGroupId::TextExport => "toolbar-group-text-export",
             ToolbarGroupId::RtonExport => "toolbar-group-rton-export",
             ToolbarGroupId::Preferences => "toolbar-group-preferences",
@@ -84,11 +80,7 @@ pub(crate) enum ToolbarDropTarget {
 
 pub(crate) fn default_toolbar_rows() -> Vec<Vec<ToolbarGroupId>> {
     vec![
-        vec![
-            ToolbarGroupId::File,
-            ToolbarGroupId::Edit,
-            ToolbarGroupId::Format,
-        ],
+        vec![ToolbarGroupId::File, ToolbarGroupId::Edit],
         vec![
             ToolbarGroupId::TextExport,
             ToolbarGroupId::RtonExport,
@@ -98,11 +90,10 @@ pub(crate) fn default_toolbar_rows() -> Vec<Vec<ToolbarGroupId>> {
     ]
 }
 
-fn all_toolbar_group_ids() -> [ToolbarGroupId; 7] {
+fn all_toolbar_group_ids() -> [ToolbarGroupId; 6] {
     [
         ToolbarGroupId::File,
         ToolbarGroupId::Edit,
-        ToolbarGroupId::Format,
         ToolbarGroupId::TextExport,
         ToolbarGroupId::RtonExport,
         ToolbarGroupId::Preferences,

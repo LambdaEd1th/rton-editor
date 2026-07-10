@@ -34,6 +34,7 @@ pub(crate) struct EditorTabState {
     pub(crate) search_generation: u64,
     pub(crate) expanded_paths: Arc<HashSet<String>>,
     pub(crate) text_cache: Vec<TextSurfaceCache>,
+    pub(crate) rton_cache: Option<RtonSurfaceCache>,
     pub(crate) dirty: bool,
 }
 
@@ -123,6 +124,12 @@ pub(crate) struct TextSurfaceCache {
     pub(crate) text_state: TextContentState,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RtonSurfaceCache {
+    pub(crate) encode_options: EncodeOptions,
+    pub(crate) byte_doc: ByteDocument,
+}
+
 #[cfg(test)]
 pub(crate) fn create_tab_from_bytes(
     id: usize,
@@ -162,6 +169,7 @@ pub(crate) fn create_tab_from_byte_document(
                 search_generation: 0,
                 expanded_paths: default_expanded_paths(),
                 text_cache: Vec::new(),
+                rton_cache: None,
                 dirty: false,
             })
         }
@@ -285,6 +293,7 @@ pub(crate) fn create_text_tab_from_surface(
         search_generation: 0,
         expanded_paths: default_expanded_paths(),
         text_cache: Vec::new(),
+        rton_cache: None,
         dirty: false,
     }
 }

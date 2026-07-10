@@ -4,8 +4,8 @@ use rton_editor_core::DecodedDocument;
 use std::sync::Arc;
 
 use crate::app_constants::LOADABLE_FILE_HINT;
-use crate::components::{MetaItem, PanelHeader, StatsGrid, lucide_icon};
-use crate::domain::Status;
+use crate::components::{MetaItem, PanelHeader, StatsGrid, button_class, lucide_icon};
+use crate::domain::{EditorMode, Status};
 use crate::i18n::I18n;
 
 #[component]
@@ -28,14 +28,27 @@ pub(crate) fn FileSummaryPanel(
     active_file_label: String,
     input_value: String,
     output_value: String,
+    active_mode: Option<EditorMode>,
     doc: Option<Arc<DecodedDocument>>,
+    on_switch_mode: EventHandler<EditorMode>,
 ) -> Element {
     rsx! {
         div { class: "rton-inspector-summary",
             PanelHeader {
                 icon: lucide_icon(LdFileArchive),
                 title: i18n.t("panel-file-properties"),
-                subtitle: i18n.t("panel-current-file")
+                subtitle: i18n.t("panel-current-file"),
+                div { class: "batch-export-grid",
+                    for mode in [EditorMode::RtonHex, EditorMode::Json, EditorMode::Yaml, EditorMode::Toml] {
+                        button {
+                            class: if active_mode == Some(mode) { button_class("primary") } else { button_class("secondary") },
+                            disabled: active_mode.is_none(),
+                            aria_pressed: active_mode == Some(mode),
+                            onclick: move |_| on_switch_mode.call(mode),
+                            "{mode.label()}"
+                        }
+                    }
+                }
             }
             section { class: "file-summary-meta-section",
                 dl { class: "meta-list",

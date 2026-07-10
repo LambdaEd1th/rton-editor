@@ -55,7 +55,6 @@ fn normalizes_toolbar_rows_and_appends_missing_groups() {
         vec![
             vec![ToolbarGroupId::Preferences, ToolbarGroupId::File],
             vec![
-                ToolbarGroupId::Format,
                 ToolbarGroupId::Edit,
                 ToolbarGroupId::TextExport,
                 ToolbarGroupId::RtonExport,
@@ -86,7 +85,6 @@ fn moves_toolbar_groups_across_rows() {
                 ToolbarGroupId::Preferences,
                 ToolbarGroupId::File,
                 ToolbarGroupId::Edit,
-                ToolbarGroupId::Format,
             ],
             vec![
                 ToolbarGroupId::TextExport,
@@ -100,11 +98,7 @@ fn moves_toolbar_groups_across_rows() {
     assert_eq!(
         rows,
         vec![
-            vec![
-                ToolbarGroupId::Preferences,
-                ToolbarGroupId::Edit,
-                ToolbarGroupId::Format,
-            ],
+            vec![ToolbarGroupId::Preferences, ToolbarGroupId::Edit],
             vec![
                 ToolbarGroupId::TextExport,
                 ToolbarGroupId::RtonExport,

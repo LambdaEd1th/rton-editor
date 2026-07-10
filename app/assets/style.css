@@ -359,8 +359,7 @@ textarea:focus-visible {
   right: -3px;
 }
 
-.rton-button,
-.rton-mode-button {
+.rton-button {
   display: inline-flex;
   position: relative;
   height: 28px;
@@ -403,29 +402,14 @@ textarea:focus-visible {
   background: var(--color-accent-strong);
 }
 
-.rton-button.secondary,
-.rton-mode-button {
+.rton-button.secondary {
   background: var(--color-control);
   color: var(--color-text-strong);
 }
 
-.rton-button.secondary:hover,
-.rton-mode-button:hover {
+.rton-button.secondary:hover {
   border-color: var(--color-border-stronger);
   background: var(--color-control-hover);
-}
-
-.rton-mode-button {
-  min-width: 56px;
-  padding: 0 8px;
-  color: var(--color-text);
-  font-weight: 650;
-}
-
-.rton-mode-button.active {
-  border-color: var(--color-accent-border);
-  background: var(--color-control-active);
-  color: var(--color-accent-text);
 }
 
 .file-input {

@@ -31,6 +31,7 @@ pub(crate) fn update_active_text(
         tab.tree_rows = empty_tree_rows();
         tab.search_result = None;
         tab.text_cache.clear();
+        tab.rton_cache = None;
         tab.task_state = None;
         tab.dirty = true;
     });
@@ -70,6 +71,7 @@ pub(crate) fn update_active_text_range(
         tab.tree_rows = empty_tree_rows();
         tab.search_result = None;
         tab.text_cache.clear();
+        tab.rton_cache = None;
         tab.task_state = None;
         tab.dirty = true;
     });
@@ -101,6 +103,7 @@ pub(crate) fn update_active_hex_edits(
         tab.text_buffer = None;
         tab.text_state = crate::domain::TextContentState::None;
         tab.text_cache.clear();
+        tab.rton_cache = None;
         tab.task_state = None;
         tab.dirty = true;
     });
@@ -226,6 +229,7 @@ pub(crate) fn clear_tab_parse_cache(tab: &mut EditorTabState) {
     tab.search_result = None;
     tab.selected_path = "$".to_string();
     tab.text_cache.clear();
+    tab.rton_cache = None;
     tab.task_state = None;
 }
 
@@ -510,6 +514,7 @@ mod tests {
             search_generation: 0,
             expanded_paths: crate::domain::default_expanded_paths(),
             text_cache: Vec::new(),
+            rton_cache: None,
             dirty: false,
         };
         let initial_text = tab.editor_text.to_string();

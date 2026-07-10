@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::app_layout::FileSummaryPanel;
 use crate::components::{ValueSearchResults, ValueTree, lucide_icon};
+use crate::domain::EditorMode;
 use crate::i18n::I18n;
 
 #[component]
@@ -14,6 +15,7 @@ pub(super) fn IndexPanel(
     active_file_label: String,
     input_value: String,
     output_value: String,
+    active_mode: Option<EditorMode>,
     active_doc: Option<Arc<DecodedDocument>>,
     active_search: String,
     selected_path: String,
@@ -23,6 +25,7 @@ pub(super) fn IndexPanel(
     on_search_change: EventHandler<String>,
     on_select_path: EventHandler<String>,
     on_toggle_path: EventHandler<String>,
+    on_switch_mode: EventHandler<EditorMode>,
     suppress_resize_observer: bool,
 ) -> Element {
     rsx! {
@@ -32,7 +35,9 @@ pub(super) fn IndexPanel(
                 active_file_label,
                 input_value,
                 output_value,
-                doc: active_doc.clone()
+                active_mode,
+                doc: active_doc.clone(),
+                on_switch_mode
             }
 
             div { class: "rton-index-panel",

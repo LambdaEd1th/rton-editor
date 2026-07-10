@@ -30,11 +30,11 @@ pub(crate) use editor_tab::document_for_tab;
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) use editor_tab::tab_surface_for_document;
 pub(crate) use editor_tab::{
-    EditorTabState, TabTaskState, TextBuffer, TextContentState, TextRangeReplacement,
-    TextSurfaceCache, create_tab_from_byte_document, create_text_tab, create_text_tab_from_surface,
-    default_expanded_paths, document_for_owned_tab, empty_editor_text, empty_tree_rows,
-    text_surface_from_text, value_search_result_for_doc, value_tree_rows_for_doc,
-    value_tree_rows_for_doc_with_expansion,
+    EditorTabState, RtonSurfaceCache, TabTaskState, TextBuffer, TextContentState,
+    TextRangeReplacement, TextSurfaceCache, create_tab_from_byte_document, create_text_tab,
+    create_text_tab_from_surface, default_expanded_paths, document_for_owned_tab,
+    empty_editor_text, empty_tree_rows, text_surface_from_text, value_search_result_for_doc,
+    value_tree_rows_for_doc, value_tree_rows_for_doc_with_expansion,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use editor_tab::{text_line_offsets, text_surface_from_arc_parts};

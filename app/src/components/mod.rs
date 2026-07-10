@@ -17,7 +17,7 @@ pub(crate) use panels::{MetaItem, PanelHeader, PanelResizeDrag, PanelResizeHandl
 pub(crate) use tab_strip::{TabHeader, TabStrip};
 pub(crate) use text_editor::TextJumpTarget;
 pub(crate) use toolbar::ToolbarGroup;
-pub(crate) use ui_helpers::{button_class, clamp_panel_width, lucide_icon, mode_button_class};
+pub(crate) use ui_helpers::{button_class, clamp_panel_width, lucide_icon};
 #[cfg(test)]
 #[cfg(test)]
 pub(crate) use value_panels::value_tree_visible_indices;
