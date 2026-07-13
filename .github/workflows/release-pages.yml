@@ -173,11 +173,11 @@ jobs:
       - name: Install Dioxus CLI
         run: |
           if ! command -v dx >/dev/null 2>&1 || ! dx --version | grep -q "dioxus ${DX_VERSION}"; then
-            cargo install dioxus-cli --version "${DX_VERSION}" --locked
+            cargo +stable install dioxus-cli --version "${DX_VERSION}" --locked
           fi
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo +stable install wasm-pack --version 0.15.0 --locked
 
       - name: Build Web Workers
         run: ./scripts/build-web-workers.sh
@@ -185,7 +185,7 @@ jobs:
       - name: Build WASM site
         run: |
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          dx build \
+          RUSTUP_TOOLCHAIN=stable dx build \
             --platform web \
             --package rton-editor-app \
             --release \

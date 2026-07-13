@@ -7,6 +7,7 @@ asset_root="$repo_root/app/assets/worker"
 
 mkdir -p "$asset_root/single" "$asset_root/threaded"
 
+RUSTUP_TOOLCHAIN=stable \
 wasm-pack build "$worker_crate" \
   --target web \
   --release \
@@ -24,6 +25,10 @@ wasm-pack build "$worker_crate" \
   -- \
   -Z build-std=panic_abort,std \
   --features wasm-threads
+
+while IFS= read -r -d '' generated_js; do
+  perl -pi -e 's/\r$//' "$generated_js"
+done < <(find "$asset_root/threaded" -type f -name '*.js' -print0)
 
 rm -f "$asset_root/single/.gitignore" "$asset_root/threaded/.gitignore"
 node "$repo_root/scripts/verify-shared-worker.mjs" \
