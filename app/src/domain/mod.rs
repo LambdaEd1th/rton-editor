@@ -38,11 +38,10 @@ pub(crate) use editor_tab::{
     create_tab_from_byte_document, create_text_tab, create_text_tab_from_surface,
     default_expanded_paths, empty_editor_text, empty_tree_rows, text_surface_from_text,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use editor_tab::{document_for_owned_tab, value_tree_rows_for_doc_with_expansion};
 #[cfg(any(not(target_arch = "wasm32"), test))]
-pub(crate) use editor_tab::{
-    document_for_owned_tab, value_search_result_for_doc, value_tree_rows_for_doc,
-    value_tree_rows_for_doc_with_expansion,
-};
+pub(crate) use editor_tab::{value_search_result_for_doc, value_tree_rows_for_doc};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use file_paths::normalize_display_path;
 pub(crate) use file_paths::{

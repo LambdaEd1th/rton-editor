@@ -287,7 +287,7 @@ pub(crate) fn value_tree_rows_for_doc(doc: &DecodedDocument) -> Arc<TreeRows> {
     ))
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn value_tree_rows_for_doc_with_expansion(
     doc: &DecodedDocument,
     expanded_paths: &HashSet<String>,
@@ -346,7 +346,7 @@ pub(crate) fn document_for_tab(tab: &EditorTabState) -> Result<Arc<DecodedDocume
     }
 }
 
-#[cfg(any(not(target_arch = "wasm32"), test))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn document_for_owned_tab(
     tab: EditorTabState,
 ) -> Result<Arc<DecodedDocument>, CoreError> {

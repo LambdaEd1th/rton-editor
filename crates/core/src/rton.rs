@@ -146,7 +146,7 @@ pub fn bytes_to_hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().saturating_mul(3));
     for (index, byte) in bytes.iter().enumerate() {
         if index > 0 {
-            if index % 16 == 0 {
+            if index.is_multiple_of(16) {
                 out.push('\n');
             } else {
                 out.push(' ');

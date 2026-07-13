@@ -12,6 +12,20 @@ pub(crate) fn load_i18n_sources() -> usize {
         .count()
 }
 
+#[cfg(all(test, target_arch = "wasm32"))]
+pub(crate) fn load_i18n_sources() -> usize {
+    [
+        ("en-US", include_str!("../assets/i18n/en-US.ftl")),
+        ("es-ES", include_str!("../assets/i18n/es-ES.ftl")),
+        ("fr-FR", include_str!("../assets/i18n/fr-FR.ftl")),
+        ("ru-RU", include_str!("../assets/i18n/ru-RU.ftl")),
+        ("zh-CN", include_str!("../assets/i18n/zh-CN.ftl")),
+    ]
+    .into_iter()
+    .filter(|(code, source)| i18n::install_locale(code, source).is_ok())
+    .count()
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn load_i18n_sources_async() -> usize {
     platform::read_i18n_sources_async()

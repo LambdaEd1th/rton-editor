@@ -368,12 +368,12 @@ fn config_dir() -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
     use crate::app_constants::{DESKTOP_WINDOW_MIN_HEIGHT, DESKTOP_WINDOW_MIN_WIDTH};
 
-    use super::{
-        WindowSizePreference, bool_preference_from_str, bool_preference_value,
-        clamp_window_size_preference, parse_window_size_preference,
-    };
+    #[cfg(not(target_arch = "wasm32"))]
+    use super::{WindowSizePreference, clamp_window_size_preference, parse_window_size_preference};
+    use super::{bool_preference_from_str, bool_preference_value};
 
     #[test]
     fn parses_boolean_preferences() {
@@ -392,6 +392,7 @@ mod tests {
         assert_eq!(bool_preference_value(false), "false");
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn parses_window_size_preferences() {
         assert_eq!(
@@ -411,6 +412,7 @@ mod tests {
         assert_eq!(parse_window_size_preference("bad"), None);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn clamps_window_size_preferences() {
         assert_eq!(
