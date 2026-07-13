@@ -251,17 +251,19 @@ fn worker_mode_switch_decodes_rton_and_returns_text_surface() {
     let bytes = encode_rton_bytes(&doc.value, EncodeOptions::default()).expect("rton encodes");
 
     let response = perform_worker_mode_switch(WorkerModeSwitchRequest {
-        source: WorkerDocumentSource::RtonBytes(bytes),
+        previous_document_id: None,
+        source: Some(WorkerDocumentSource::RtonBytes(bytes)),
         target_mode: WorkerEditorMode::Json,
         search_query: "Peashooter".to_string(),
         encode_options: EncodeOptions::default(),
     })
     .expect("worker mode switch succeeds");
 
-    assert_eq!(response.doc.value, doc.value);
-    assert!(!response.tree_rows.rows.is_empty());
+    assert_eq!(response.document.value, doc.value);
+    assert!(!response.response.tree_rows.rows.is_empty());
     assert_eq!(
         response
+            .response
             .search_result
             .as_ref()
             .expect("search result")
@@ -272,19 +274,17 @@ fn worker_mode_switch_decodes_rton_and_returns_text_surface() {
 
     let WorkerSurface::Text {
         text,
-        line_offsets,
         byte_count,
         line_count,
         format,
-    } = response.surface
+    } = response.response.surface
     else {
         panic!("expected text surface");
     };
     assert_eq!(format, TextFormat::Json);
     assert!(text.contains("Peashooter"));
     assert_eq!(byte_count, text.len());
-    assert_eq!(line_count, line_offsets.len());
-    assert_eq!(line_offsets.first(), Some(&0));
+    assert_eq!(line_count, text.lines().count());
 }
 
 #[test]
@@ -293,15 +293,17 @@ fn worker_parse_decodes_source_and_returns_index_payload() {
     let bytes = encode_rton_bytes(&doc.value, EncodeOptions::default()).expect("rton encodes");
 
     let response = perform_worker_parse(WorkerParseRequest {
-        source: WorkerDocumentSource::RtonBytes(bytes),
+        previous_document_id: None,
+        source: Some(WorkerDocumentSource::RtonBytes(bytes)),
         search_query: "cost".to_string(),
     })
     .expect("worker parse succeeds");
 
-    assert_eq!(response.doc.value, doc.value);
-    assert!(!response.tree_rows.rows.is_empty());
+    assert_eq!(response.document.value, doc.value);
+    assert!(!response.response.tree_rows.rows.is_empty());
     assert_eq!(
         response
+            .response
             .search_result
             .as_ref()
             .expect("search result")
@@ -309,7 +311,7 @@ fn worker_parse_decodes_source_and_returns_index_payload() {
             .len(),
         1
     );
-    assert_eq!(response.search_query, "cost");
+    assert_eq!(response.response.search_query, "cost");
 }
 
 #[test]
@@ -323,10 +325,11 @@ fn worker_open_text_returns_surface_and_index_for_valid_text() {
     })
     .expect("worker open text succeeds");
 
-    assert_eq!(response.doc.as_ref().expect("doc").value, doc.value);
-    assert!(!response.tree_rows.rows.is_empty());
+    assert_eq!(response.document.as_ref().expect("doc").value, doc.value);
+    assert!(!response.response.tree_rows.rows.is_empty());
     assert_eq!(
         response
+            .response
             .search_result
             .as_ref()
             .expect("search result")
@@ -337,18 +340,17 @@ fn worker_open_text_returns_surface_and_index_for_valid_text() {
 
     let WorkerSurface::Text {
         text,
-        line_offsets,
         byte_count,
         line_count,
         format,
-    } = response.surface
+    } = response.response.surface
     else {
         panic!("expected text surface");
     };
     assert_eq!(format, TextFormat::Json);
     assert_eq!(text, SAMPLE);
     assert_eq!(byte_count, text.len());
-    assert_eq!(line_count, line_offsets.len());
+    assert_eq!(line_count, text.lines().count());
 }
 
 #[test]
@@ -360,10 +362,10 @@ fn worker_open_text_keeps_surface_for_invalid_text() {
     })
     .expect("worker open text keeps editable surface");
 
-    assert!(response.doc.is_none());
-    assert!(response.tree_rows.rows.is_empty());
-    assert!(response.search_result.is_none());
-    let WorkerSurface::Text { text, .. } = response.surface else {
+    assert!(response.document.is_none());
+    assert!(response.response.tree_rows.rows.is_empty());
+    assert!(response.response.search_result.is_none());
+    let WorkerSurface::Text { text, .. } = response.response.surface else {
         panic!("expected text surface");
     };
     assert_eq!(text, "{ invalid");
@@ -379,7 +381,8 @@ fn worker_rton_size_returns_target_encoded_length() {
     };
 
     let response = perform_worker_rton_size(WorkerRtonSizeRequest {
-        source: WorkerDocumentSource::RtonBytes(bytes),
+        document_id: None,
+        source: Some(WorkerDocumentSource::RtonBytes(bytes)),
         encode_options,
     })
     .expect("worker rton size succeeds");
@@ -389,24 +392,71 @@ fn worker_rton_size_returns_target_encoded_length() {
 }
 
 #[test]
+fn worker_document_operations_support_borrowed_cache_entries() {
+    let doc = parse_text(SAMPLE, TextFormat::Json).expect("json parses");
+    let response = perform_worker_mode_switch_for_document(
+        &doc,
+        WorkerEditorMode::Yaml,
+        EncodeOptions::default(),
+        "Peashooter".to_string(),
+    )
+    .expect("borrowed mode switch succeeds");
+    assert_eq!(response.stats, doc.stats);
+    assert_eq!(
+        response.search_result.expect("search result").matches.len(),
+        1
+    );
+    assert!(matches!(
+        response.surface,
+        WorkerSurface::Text {
+            format: TextFormat::Yaml,
+            ..
+        }
+    ));
+
+    let parsed = perform_worker_parse_for_document(&doc, "cost".to_string());
+    assert_eq!(parsed.stats, doc.stats);
+    assert_eq!(
+        parsed.search_result.expect("search result").matches.len(),
+        1
+    );
+
+    let size = perform_worker_rton_size_for_document(&doc, EncodeOptions::default())
+        .expect("borrowed size calculation succeeds");
+    assert!(size.byte_len > 0);
+}
+
+#[test]
+fn worker_owned_operations_reject_missing_fallback_sources() {
+    let error = perform_worker_parse(WorkerParseRequest {
+        previous_document_id: Some(7),
+        source: None,
+        search_query: String::new(),
+    })
+    .expect_err("core cannot resolve a worker-local cache id");
+    assert!(matches!(error, CoreError::InvalidWorkerRequest(_)));
+}
+
+#[test]
 fn worker_mode_switch_parses_text_and_returns_rton_surface() {
     let doc = parse_text(SAMPLE, TextFormat::Json).expect("json parses");
 
     let response = perform_worker_mode_switch(WorkerModeSwitchRequest {
-        source: WorkerDocumentSource::Text {
+        previous_document_id: None,
+        source: Some(WorkerDocumentSource::Text {
             text: SAMPLE.to_string(),
             format: TextFormat::Json,
-        },
+        }),
         target_mode: WorkerEditorMode::RtonHex,
         search_query: String::new(),
         encode_options: EncodeOptions::default(),
     })
     .expect("worker mode switch succeeds");
 
-    assert_eq!(response.doc.value, doc.value);
-    assert!(response.search_result.is_none());
+    assert_eq!(response.document.value, doc.value);
+    assert!(response.response.search_result.is_none());
 
-    let WorkerSurface::RtonBytes(bytes) = response.surface else {
+    let WorkerSurface::RtonBytes(bytes) = response.response.surface else {
         panic!("expected rton byte surface");
     };
     let decoded = decode_rton_bytes(&bytes).expect("worker rton decodes");
@@ -418,10 +468,11 @@ fn worker_mode_switch_uses_rton_encode_options() {
     let doc = parse_text(SAMPLE, TextFormat::Json).expect("json parses");
 
     let response = perform_worker_mode_switch(WorkerModeSwitchRequest {
-        source: WorkerDocumentSource::Text {
+        previous_document_id: None,
+        source: Some(WorkerDocumentSource::Text {
             text: SAMPLE.to_string(),
             format: TextFormat::Json,
-        },
+        }),
         target_mode: WorkerEditorMode::RtonHex,
         search_query: String::new(),
         encode_options: EncodeOptions {
@@ -431,7 +482,7 @@ fn worker_mode_switch_uses_rton_encode_options() {
     })
     .expect("worker mode switch succeeds");
 
-    let WorkerSurface::RtonBytes(bytes) = response.surface else {
+    let WorkerSurface::RtonBytes(bytes) = response.response.surface else {
         panic!("expected rton byte surface");
     };
     let compact = encode_rton_bytes(
@@ -443,4 +494,47 @@ fn worker_mode_switch_uses_rton_encode_options() {
     )
     .expect("compact rton encodes");
     assert_eq!(bytes, compact);
+}
+
+#[test]
+fn surface_text_search_preserves_utf8_boundaries_and_caps_results() {
+    let text = format!("{}世界{}", "Alpha ".repeat(3_000), " alpha".repeat(3_000));
+    let result = find_text_search_result(&text, "alpha", false);
+
+    assert_eq!(result.matches.len(), SURFACE_SEARCH_MATCH_LIMIT);
+    assert!(result.capped);
+    assert!(result.matches.iter().all(|match_| {
+        text.is_char_boundary(match_.start)
+            && text.is_char_boundary(match_.end)
+            && text[match_.start..match_.end].eq_ignore_ascii_case("alpha")
+    }));
+}
+
+#[test]
+fn surface_hex_search_returns_non_overlapping_matches() {
+    let bytes = b"aaaaAAaa".to_vec();
+    let result = find_hex_search_result(&bytes, b"aa", true);
+
+    assert_eq!(
+        result.matches,
+        vec![
+            HexSearchMatch {
+                offset: 0,
+                length: 2,
+            },
+            HexSearchMatch {
+                offset: 2,
+                length: 2,
+            },
+            HexSearchMatch {
+                offset: 4,
+                length: 2,
+            },
+            HexSearchMatch {
+                offset: 6,
+                length: 2,
+            },
+        ]
+    );
+    assert!(!result.capped);
 }

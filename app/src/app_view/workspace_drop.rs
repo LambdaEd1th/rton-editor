@@ -19,7 +19,7 @@ pub(super) async fn handle_workspace_file_drop(
     file_selection: Signal<FileSelection>,
     mut status: Signal<Status>,
     i18n: I18n,
-) {
+) -> bool {
     event.prevent_default();
     dragging_files.set(false);
 
@@ -33,6 +33,7 @@ pub(super) async fn handle_workspace_file_drop(
                     .collect::<Vec<_>>();
                 if drafts.is_empty() {
                     status.set(Status::new(i18n.t("status-no-loadable-files"), Tone::Warn));
+                    return false;
                 } else {
                     let indexed = stage_loaded_file_drafts(
                         loaded_files,
@@ -44,20 +45,20 @@ pub(super) async fn handle_workspace_file_drop(
                         i18n.t_args("status-indexed-files", &[("count", indexed.to_string())]),
                         Tone::Ok,
                     ));
+                    return indexed > 0;
                 }
-                return;
             }
             Ok(None) => {}
             Err(error) => {
                 status.set(Status::new(error, Tone::Error));
-                return;
+                return false;
             }
         }
     }
 
     let files = event.files();
     if files.is_empty() {
-        return;
+        return false;
     }
 
     let mut drafts = Vec::new();
@@ -96,6 +97,7 @@ pub(super) async fn handle_workspace_file_drop(
         if skipped > 0 {
             status.set(Status::new(i18n.t("status-no-loadable-files"), Tone::Warn));
         }
+        false
     } else {
         let indexed =
             stage_loaded_file_drafts(loaded_files, next_loaded_file_id, file_selection, drafts);
@@ -103,5 +105,30 @@ pub(super) async fn handle_workspace_file_drop(
             i18n.t_args("status-indexed-files", &[("count", indexed.to_string())]),
             Tone::Ok,
         ));
+        indexed > 0
     }
+}
+
+pub(super) fn workspace_drag_has_files(event: &DragEvent) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(web_event) = event.data().downcast::<web_sys::DragEvent>()
+            && let Some(data_transfer) = web_event.data_transfer()
+        {
+            if data_transfer
+                .files()
+                .is_some_and(|files| files.length() > 0)
+            {
+                return true;
+            }
+            let items = data_transfer.items();
+            for index in 0..items.length() {
+                if items.get(index).is_some_and(|item| item.kind() == "file") {
+                    return true;
+                }
+            }
+        }
+    }
+
+    !event.files().is_empty()
 }

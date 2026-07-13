@@ -1,21 +1,27 @@
 use rton_editor_core::{
     BinaryEncoding, CoreError, DecodedDocument, ENCRYPTED_RTON_PREFIX, EncodeOptions, SourceFormat,
-    TextFormat, TreeRows, ValueSearchResult, decode_hex_rton, decode_rton_reader,
-    decrypt_rton_bytes_if_needed, detect_rton_binary_encoding, flatten_expanded_value_tree,
-    parse_text, search_value_tree,
+    TextFormat, TreeRows, ValueSearchResult, ValueStats, decrypt_rton_bytes_if_needed,
+    detect_rton_binary_encoding,
 };
 #[cfg(any(not(target_arch = "wasm32"), test))]
-use rton_editor_core::{encode_rton_bytes, value_to_text};
+use rton_editor_core::{
+    decode_hex_rton, decode_rton_reader, encode_rton_bytes, flatten_expanded_value_tree,
+    parse_text, search_value_tree, value_to_text,
+};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::{ByteDocument, EditorMode, HexHistory, TextHistory};
+use super::{ByteDocument, EditorMode, HexHistory, TextBuffer, TextHistory};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct EditorTabState {
     pub(crate) id: usize,
+    pub(crate) content_revision: u64,
     pub(crate) file_name: String,
     pub(crate) doc: Option<Arc<DecodedDocument>>,
+    pub(crate) stats: Option<ValueStats>,
+    pub(crate) worker_document_id: Option<u64>,
+    pub(crate) worker_surface_mode: Option<EditorMode>,
     pub(crate) byte_doc: Option<ByteDocument>,
     pub(crate) source_encode_options: EncodeOptions,
     pub(crate) tree_rows: Arc<TreeRows>,
@@ -44,51 +50,6 @@ pub(crate) struct TabSurface {
     pub(crate) editor_text: Arc<str>,
     pub(crate) text_buffer: Option<Arc<TextBuffer>>,
     pub(crate) text_state: TextContentState,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TextBuffer {
-    pub(crate) text: Arc<str>,
-    pub(crate) line_offsets: Arc<[usize]>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TextRangeReplacement {
-    pub(crate) start_line: usize,
-    pub(crate) start_column_utf16: usize,
-    pub(crate) end_line: usize,
-    pub(crate) end_column_utf16: usize,
-    pub(crate) replacement: String,
-}
-
-impl TextBuffer {
-    pub(crate) fn new(text: String) -> Self {
-        let line_offsets = Arc::<[usize]>::from(text_line_offsets(&text));
-        Self {
-            text: Arc::from(text),
-            line_offsets,
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn from_parts(text: String, line_offsets: Vec<usize>) -> Self {
-        Self::from_arc_parts(Arc::from(text), line_offsets)
-    }
-
-    pub(crate) fn from_arc_parts(text: Arc<str>, line_offsets: Vec<usize>) -> Self {
-        Self {
-            text,
-            line_offsets: Arc::from(line_offsets),
-        }
-    }
-
-    pub(crate) fn line_count(&self) -> usize {
-        self.line_offsets.len()
-    }
-
-    pub(crate) fn byte_count(&self) -> usize {
-        self.text.len()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,8 +110,12 @@ pub(crate) fn create_tab_from_byte_document(
             let display_source = rton_hex_byte_document_for_display(byte_doc);
             Ok(EditorTabState {
                 id,
+                content_revision: 0,
                 file_name: name,
                 doc: None,
+                stats: None,
+                worker_document_id: None,
+                worker_surface_mode: None,
                 byte_doc: Some(display_source.byte_doc),
                 source_encode_options: display_source.encode_options,
                 tree_rows: empty_tree_rows(),
@@ -273,9 +238,13 @@ pub(crate) fn create_text_tab_from_surface(
     };
     EditorTabState {
         id,
+        content_revision: 0,
         file_name,
         tree_rows: empty_tree_rows(),
         doc: None,
+        stats: None,
+        worker_document_id: None,
+        worker_surface_mode: None,
         byte_doc: surface.byte_doc,
         source_encode_options: EncodeOptions::default(),
         search_result: None,
@@ -309,6 +278,7 @@ pub(crate) fn empty_editor_text() -> Arc<str> {
     Arc::<str>::from("")
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn value_tree_rows_for_doc(doc: &DecodedDocument) -> Arc<TreeRows> {
     Arc::new(flatten_expanded_value_tree(
         &doc.value,
@@ -317,6 +287,7 @@ pub(crate) fn value_tree_rows_for_doc(doc: &DecodedDocument) -> Arc<TreeRows> {
     ))
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn value_tree_rows_for_doc_with_expansion(
     doc: &DecodedDocument,
     expanded_paths: &HashSet<String>,
@@ -332,6 +303,7 @@ pub(crate) fn default_expanded_paths() -> Arc<HashSet<String>> {
     Arc::new(HashSet::from(["$".to_string()]))
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn value_search_result_for_doc(
     doc: &DecodedDocument,
     query: &str,
@@ -343,6 +315,7 @@ pub(crate) fn value_search_result_for_doc(
     }
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn parse_editor_text(
     text: &str,
     mode: EditorMode,
@@ -355,6 +328,7 @@ pub(crate) fn parse_editor_text(
     }
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn document_for_tab(tab: &EditorTabState) -> Result<Arc<DecodedDocument>, CoreError> {
     match tab.mode {
         EditorMode::RtonHex => tab
@@ -363,16 +337,16 @@ pub(crate) fn document_for_tab(tab: &EditorTabState) -> Result<Arc<DecodedDocume
             .map(|bytes| decode_rton_reader(bytes.reader()).map(Arc::new))
             .unwrap_or_else(|| decode_hex_rton(tab.editor_text.as_ref()).map(Arc::new)),
         EditorMode::Json | EditorMode::Yaml | EditorMode::Toml => {
-            let text = tab
-                .text_buffer
-                .as_ref()
-                .map(|buffer| buffer.text.as_ref())
-                .unwrap_or_else(|| tab.editor_text.as_ref());
-            parse_editor_text(text, tab.mode).map(Arc::new)
+            if let Some(buffer) = tab.text_buffer.as_ref() {
+                parse_editor_text(&buffer.materialize(), tab.mode).map(Arc::new)
+            } else {
+                parse_editor_text(tab.editor_text.as_ref(), tab.mode).map(Arc::new)
+            }
         }
     }
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn document_for_owned_tab(
     tab: EditorTabState,
 ) -> Result<Arc<DecodedDocument>, CoreError> {
@@ -423,22 +397,17 @@ pub(crate) fn text_surface_from_text(editor_text: String, format: TextFormat) ->
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn text_surface_from_arc_parts(
-    editor_text: Arc<str>,
-    line_offsets: Vec<usize>,
-    format: TextFormat,
-) -> TabSurface {
-    let text_buffer = Arc::new(TextBuffer::from_arc_parts(editor_text, line_offsets));
+pub(crate) fn text_surface_from_arc(editor_text: Arc<str>, format: TextFormat) -> TabSurface {
+    let text_buffer = Arc::new(TextBuffer::from_arc(editor_text));
     text_surface_from_buffer(text_buffer, format)
 }
 
 fn text_surface_from_buffer(text_buffer: Arc<TextBuffer>, format: TextFormat) -> TabSurface {
-    let editor_text = text_buffer.text.clone();
     let byte_count = text_buffer.byte_count();
     let line_count = text_buffer.line_count();
     TabSurface {
         byte_doc: None,
-        editor_text,
+        editor_text: empty_editor_text(),
         text_buffer: Some(text_buffer),
         text_state: TextContentState::Text {
             byte_count,
@@ -446,18 +415,4 @@ fn text_surface_from_buffer(text_buffer: Arc<TextBuffer>, format: TextFormat) ->
             format,
         },
     }
-}
-
-pub(crate) fn text_line_offsets(text: &str) -> Vec<usize> {
-    if text.is_empty() {
-        return Vec::new();
-    }
-
-    let mut offsets = vec![0];
-    for (index, byte) in text.bytes().enumerate() {
-        if byte == b'\n' && index + 1 < text.len() {
-            offsets.push(index + 1);
-        }
-    }
-    offsets
 }

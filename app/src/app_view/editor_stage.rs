@@ -1,29 +1,66 @@
 use dioxus::prelude::*;
 use dioxus_html::input_data::MouseButton;
 
+use super::text_selection::*;
 use crate::app_layout::EmptyDropStage;
 use crate::components::TextJumpTarget;
+use crate::components::context_menu_transition::{dismiss_context_menu, show_context_menu};
 use crate::components::{HexEditor, HexJumpTarget};
 use crate::domain::virtual_scroll::{TEXT_MAX_VIRTUAL_SCROLL_HEIGHT, TEXT_OVERSCAN_ROWS};
 use crate::domain::{
-    ByteDocument, EditorMode, HexEdit, TEXT_DEFAULT_VIEWPORT_HEIGHT, TEXT_ROW_HEIGHT, TabTaskState,
-    TextBuffer, TextContentState, TextRangeReplacement, measured_text_viewport_height,
-    text_virtual_row_top, text_virtual_scroll,
+    ByteDocument, EditorMode, HexEdit, IdentityArc, TEXT_DEFAULT_VIEWPORT_HEIGHT, TEXT_ROW_HEIGHT,
+    TabTaskState, TextBuffer, TextContentState, TextRangeReplacement,
+    measured_text_viewport_height, text_virtual_row_top, text_virtual_scroll,
 };
 use crate::i18n::I18n;
+use crate::platform;
 use std::sync::Arc;
 
 const TEXT_WRAP_CHAR_WIDTH: usize = 8;
 const TEXT_WRAP_LINE_NUMBER_WIDTH: usize = 76;
 const TEXT_WRAP_HORIZONTAL_PADDING: usize = 30;
 const TEXT_DEFAULT_VIEWPORT_WIDTH: usize = 960;
-const TEXT_WRAP_FULL_LAYOUT_LINE_LIMIT: usize = 20_000;
+const TEXT_WRAP_LAYOUT_BATCH_LINES: usize = 2_048;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TextWrapLayout {
     line_tops: Arc<Vec<usize>>,
     line_heights: Arc<Vec<usize>>,
     logical_height: usize,
+}
+
+struct TextWrapLayoutBuilder {
+    chars_per_row: usize,
+    line_tops: Vec<usize>,
+    line_heights: Vec<usize>,
+    logical_height: usize,
+}
+
+impl TextWrapLayoutBuilder {
+    fn new(line_count: usize, viewport_width: usize) -> Self {
+        Self {
+            chars_per_row: text_wrap_chars_per_row(viewport_width),
+            line_tops: Vec::with_capacity(line_count),
+            line_heights: Vec::with_capacity(line_count),
+            logical_height: 0,
+        }
+    }
+
+    fn push_line(&mut self, line_len: usize) {
+        self.line_tops.push(self.logical_height);
+        let visual_rows = line_len.max(1).div_ceil(self.chars_per_row).max(1);
+        let height = visual_rows.saturating_mul(TEXT_ROW_HEIGHT);
+        self.line_heights.push(height);
+        self.logical_height = self.logical_height.saturating_add(height);
+    }
+
+    fn finish(self) -> TextWrapLayout {
+        TextWrapLayout {
+            line_tops: Arc::new(self.line_tops),
+            line_heights: Arc::new(self.line_heights),
+            logical_height: self.logical_height,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,20 +83,6 @@ struct VisibleTextLine {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct VirtualTextSelection {
-    start_line: usize,
-    start_column_utf16: usize,
-    end_line: usize,
-    end_column_utf16: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct VirtualTextPoint {
-    line_index: usize,
-    column_utf16: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct VirtualTextDrag {
     anchor: VirtualTextPoint,
     active: bool,
@@ -75,7 +98,8 @@ struct VirtualTextContextMenu {
 pub(super) struct EditorStageTab {
     pub(super) id: usize,
     pub(super) mode: EditorMode,
-    pub(super) text_buffer: Option<Arc<TextBuffer>>,
+    pub(super) worker_document_id: Option<u64>,
+    pub(super) text_buffer: Option<IdentityArc<TextBuffer>>,
     pub(super) text_state: TextContentState,
     pub(super) task_state: Option<TabTaskState>,
 }
@@ -125,6 +149,7 @@ pub(super) fn EditorStage(
                         HexEditor {
                             key: "{active_tab.id}-hex",
                             bytes: byte_doc,
+                            worker_document_id: active_tab.worker_document_id,
                             jump_target: hex_jump_target,
                             search_panel_visible: editor_search_panel_visible,
                             i18n,
@@ -249,7 +274,7 @@ pub(super) fn EditorStage(
 #[component]
 fn VirtualTextEditor(
     i18n: I18n,
-    buffer: Arc<TextBuffer>,
+    buffer: IdentityArc<TextBuffer>,
     jump_target: Option<TextJumpTarget>,
     line_wrapping: bool,
     on_change: EventHandler<TextRangeReplacement>,
@@ -266,9 +291,13 @@ fn VirtualTextEditor(
     });
     let mut selection = use_signal(|| None::<VirtualTextSelection>);
     let mut input_sink_value = use_signal(String::new);
-    let mut context_menu = use_signal(|| None::<VirtualTextContextMenu>);
+    let context_menu = use_signal(|| None::<VirtualTextContextMenu>);
+    let context_menu_closing = use_signal(|| false);
+    let context_menu_generation = use_signal(|| 0_u64);
     let viewport_height = use_signal(|| TEXT_DEFAULT_VIEWPORT_HEIGHT);
     let viewport_width = use_signal(|| TEXT_DEFAULT_VIEWPORT_WIDTH);
+    let mut wrap_layout = use_signal(|| None::<Arc<TextWrapLayout>>);
+    let mut wrap_layout_generation = use_signal(|| 0_u64);
     let mut mounted = use_signal(|| None::<MountedEvent>);
     let mut last_jump_id = use_signal(|| None::<u64>);
     let line_count = buffer.line_count();
@@ -278,6 +307,7 @@ fn VirtualTextEditor(
     let selection_snapshot = *selection.read();
     let caret_snapshot = *caret.read();
     let context_menu_snapshot = *context_menu.read();
+    let context_menu_closing_snapshot = *context_menu_closing.read();
 
     {
         let buffer = buffer.clone();
@@ -340,18 +370,36 @@ fn VirtualTextEditor(
         ));
     }
 
-    let wrap_layout = use_memo(use_reactive(
-        &(buffer.clone(), line_wrapping, viewport_width_snapshot),
-        move |(buffer, line_wrapping, viewport_width)| {
-            (line_wrapping && buffer.line_count() <= TEXT_WRAP_FULL_LAYOUT_LINE_LIMIT).then(|| {
-                Arc::new(text_wrap_layout(
-                    buffer.text.as_ref(),
-                    buffer.line_offsets.as_ref(),
-                    viewport_width,
-                ))
-            })
-        },
-    ));
+    {
+        let buffer = buffer.clone();
+        use_effect(use_reactive(
+            &(buffer, line_wrapping, viewport_width_snapshot),
+            move |(buffer, line_wrapping, viewport_width)| {
+                let generation = (*wrap_layout_generation.peek()).wrapping_add(1);
+                wrap_layout_generation.set(generation);
+                wrap_layout.set(None);
+                if !line_wrapping {
+                    return;
+                }
+
+                spawn(async move {
+                    let Some(layout) = responsive_text_wrap_layout(
+                        buffer,
+                        viewport_width,
+                        wrap_layout_generation,
+                        generation,
+                    )
+                    .await
+                    else {
+                        return;
+                    };
+                    if *wrap_layout_generation.peek() == generation {
+                        wrap_layout.set(Some(Arc::new(layout)));
+                    }
+                });
+            },
+        ));
+    }
     let wrap_layout_snapshot = wrap_layout.read().clone();
     let wrapped_scroll = wrap_layout_snapshot
         .as_deref()
@@ -365,8 +413,7 @@ fn VirtualTextEditor(
         .unwrap_or(0);
     let effective_line_wrapping = line_wrapping && wrap_layout_snapshot.is_some();
     let visible_lines = text_buffer_visible_lines(
-        buffer.text.as_ref(),
-        buffer.line_offsets.as_ref(),
+        &buffer,
         scroll_top_snapshot,
         virtual_scroll,
         wrap_layout_snapshot.as_deref(),
@@ -382,7 +429,13 @@ fn VirtualTextEditor(
     rsx! {
         div {
             class: preview_class,
-            onmousedown: move |_| context_menu.set(None),
+            onmousedown: move |_| {
+                dismiss_context_menu(
+                    context_menu,
+                    context_menu_closing,
+                    context_menu_generation,
+                );
+            },
             div {
                 class: "virtual-text-preview-content",
                 tabindex: "0",
@@ -415,7 +468,11 @@ fn VirtualTextEditor(
                     }
                 },
                 onscroll: move |event| {
-                    context_menu.set(None);
+                    dismiss_context_menu(
+                        context_menu,
+                        context_menu_closing,
+                        context_menu_generation,
+                    );
                     scroll_top.set(event.scroll_top());
                 },
                 onmouseup: move |_| finish_virtual_text_drag(drag_selection),
@@ -428,16 +485,30 @@ fn VirtualTextEditor(
                     autocapitalize: "off",
                     autocomplete: "off",
                     value: "{input_sink_value}",
-                    onblur: move |_| context_menu.set(None),
+                    onblur: move |_| {
+                        dismiss_context_menu(
+                            context_menu,
+                            context_menu_closing,
+                            context_menu_generation,
+                        );
+                    },
                     onkeydown: {
                         let buffer = buffer.clone();
                         move |event| {
                             if event.key().to_string() == "Escape" && context_menu.peek().is_some() {
                                 event.prevent_default();
-                                context_menu.set(None);
+                                dismiss_context_menu(
+                                    context_menu,
+                                    context_menu_closing,
+                                    context_menu_generation,
+                                );
                                 return;
                             }
-                            context_menu.set(None);
+                            dismiss_context_menu(
+                                context_menu,
+                                context_menu_closing,
+                                context_menu_generation,
+                            );
                             handle_virtual_text_key(
                                 event,
                                 &buffer,
@@ -454,7 +525,11 @@ fn VirtualTextEditor(
                     oninput: {
                         let buffer = buffer.clone();
                         move |event| {
-                            context_menu.set(None);
+                            dismiss_context_menu(
+                                context_menu,
+                                context_menu_closing,
+                                context_menu_generation,
+                            );
                             let text = event.value();
                             input_sink_value.set(String::new());
                             if text.is_empty() {
@@ -527,6 +602,8 @@ fn VirtualTextEditor(
                             let selection_for_update = selection;
                             let mounted_for_context_menu = mounted;
                             let context_menu_for_open = context_menu;
+                            let context_menu_closing_for_open = context_menu_closing;
+                            let context_menu_generation_for_open = context_menu_generation;
                             rsx! {
                                 VirtualTextLineView {
                                         key: "{line.line_index}-view",
@@ -554,15 +631,17 @@ fn VirtualTextEditor(
                                         }),
                                         on_context_menu: EventHandler::new(move |menu| {
                                             let mounted = mounted_for_context_menu.peek().clone();
-                                            let mut context_menu_for_open = context_menu_for_open;
                                             spawn(async move {
-                                                context_menu_for_open.set(Some(
+                                                show_context_menu(
+                                                    context_menu_for_open,
+                                                    context_menu_closing_for_open,
+                                                    context_menu_generation_for_open,
                                                     virtual_text_context_menu_from_client_position(
                                                         menu,
                                                         mounted,
                                                     )
                                                     .await,
-                                                ));
+                                                );
                                             });
                                         })
                                     }
@@ -574,7 +653,7 @@ fn VirtualTextEditor(
             }
             if let Some(menu) = context_menu_snapshot {
                     div {
-                        class: "virtual-text-context-menu",
+                        class: if context_menu_closing_snapshot { "virtual-text-context-menu closing" } else { "virtual-text-context-menu" },
                         role: "menu",
                         style: "left: {menu.x}px; top: {menu.y}px",
                         onmousedown: move |event| {
@@ -589,7 +668,11 @@ fn VirtualTextEditor(
                                 let buffer = buffer.clone();
                                 move |_| {
                                     copy_virtual_text_selection_to_clipboard(&buffer, *selection.read());
-                                    context_menu.set(None);
+                                    dismiss_context_menu(
+                                        context_menu,
+                                        context_menu_closing,
+                                        context_menu_generation,
+                                    );
                                     focus_virtual_text_input_layer();
                                 }
                             },
@@ -608,7 +691,11 @@ fn VirtualTextEditor(
                                         selection,
                                         on_change,
                                     );
-                                    context_menu.set(None);
+                                    dismiss_context_menu(
+                                        context_menu,
+                                        context_menu_closing,
+                                        context_menu_generation,
+                                    );
                                 }
                             },
                             {i18n.t("editor-context-cut")}
@@ -617,7 +704,11 @@ fn VirtualTextEditor(
                             r#type: "button",
                             role: "menuitem",
                             onclick: move |_| {
-                                context_menu.set(None);
+                                dismiss_context_menu(
+                                    context_menu,
+                                    context_menu_closing,
+                                    context_menu_generation,
+                                );
                                 paste_virtual_text_from_clipboard();
                             },
                             {i18n.t("editor-context-paste")}
@@ -630,7 +721,11 @@ fn VirtualTextEditor(
                                 let buffer = buffer.clone();
                                 move |_| {
                                     select_all_virtual_text(&buffer, caret, selection);
-                                    context_menu.set(None);
+                                    dismiss_context_menu(
+                                        context_menu,
+                                        context_menu_closing,
+                                        context_menu_generation,
+                                    );
                                 }
                             },
                             {i18n.t("editor-context-select-all")}
@@ -723,15 +818,14 @@ fn focus_editor_find_input() {
 }
 
 fn text_buffer_visible_lines(
-    text: &str,
-    line_offsets: &[usize],
+    buffer: &TextBuffer,
     scroll_top: f64,
     virtual_scroll: Option<crate::domain::virtual_scroll::TextVirtualScroll>,
     wrap_layout: Option<&TextWrapLayout>,
     wrapped_scroll: Option<WrappedTextScroll>,
 ) -> Vec<VisibleTextLine> {
     if let (Some(layout), Some(scroll)) = (wrap_layout, wrapped_scroll) {
-        return wrapped_text_buffer_visible_lines(text, line_offsets, layout, scroll);
+        return wrapped_text_buffer_visible_lines(buffer, layout, scroll);
     }
 
     let Some(virtual_scroll) = virtual_scroll else {
@@ -739,8 +833,7 @@ fn text_buffer_visible_lines(
     };
 
     fixed_text_buffer_visible_lines(
-        text,
-        line_offsets,
+        buffer,
         virtual_scroll.start_row,
         virtual_scroll.end_row,
         scroll_top,
@@ -749,8 +842,7 @@ fn text_buffer_visible_lines(
 }
 
 fn fixed_text_buffer_visible_lines(
-    text: &str,
-    line_offsets: &[usize],
+    buffer: &TextBuffer,
     start_row: usize,
     end_row: usize,
     scroll_top: f64,
@@ -758,7 +850,7 @@ fn fixed_text_buffer_visible_lines(
 ) -> Vec<VisibleTextLine> {
     (start_row..end_row)
         .filter_map(|row_index| {
-            let line_text = text_line_at(text, line_offsets, row_index)?;
+            let line_text = buffer.line_text(row_index)?;
             Some(VisibleTextLine {
                 top: text_virtual_row_top(row_index, scroll_top, virtual_scroll),
                 height: TEXT_ROW_HEIGHT,
@@ -771,8 +863,7 @@ fn fixed_text_buffer_visible_lines(
 }
 
 fn wrapped_text_buffer_visible_lines(
-    text: &str,
-    line_offsets: &[usize],
+    buffer: &TextBuffer,
     layout: &TextWrapLayout,
     scroll: WrappedTextScroll,
 ) -> Vec<VisibleTextLine> {
@@ -781,7 +872,7 @@ fn wrapped_text_buffer_visible_lines(
             let line_top = *layout.line_tops.get(row_index)?;
             let line_height = *layout.line_heights.get(row_index)?;
             let top = wrapped_text_row_top(line_top, scroll);
-            let line_text = text_line_at(text, line_offsets, row_index)?;
+            let line_text = buffer.line_text(row_index)?;
             Some(VisibleTextLine {
                 top,
                 height: line_height,
@@ -793,39 +884,34 @@ fn wrapped_text_buffer_visible_lines(
         .collect()
 }
 
-fn text_line_at(text: &str, line_offsets: &[usize], row_index: usize) -> Option<String> {
-    let start = *line_offsets.get(row_index)?;
-    let mut end = line_offsets
-        .get(row_index + 1)
-        .copied()
-        .map(|offset| offset.saturating_sub(1))
-        .unwrap_or(text.len());
-    if end > start && text.as_bytes().get(end.saturating_sub(1)) == Some(&b'\r') {
-        end = end.saturating_sub(1);
+#[cfg(test)]
+fn text_wrap_layout(buffer: &TextBuffer, viewport_width: usize) -> TextWrapLayout {
+    let line_count = buffer.line_count();
+    let mut builder = TextWrapLayoutBuilder::new(line_count, viewport_width);
+    for row_index in 0..line_count {
+        builder.push_line(buffer.line_byte_len(row_index).unwrap_or(0));
     }
-    Some(text[start..end].to_string())
+    builder.finish()
 }
 
-fn text_wrap_layout(text: &str, line_offsets: &[usize], viewport_width: usize) -> TextWrapLayout {
-    let chars_per_row = text_wrap_chars_per_row(viewport_width);
-    let mut line_tops = Vec::with_capacity(line_offsets.len());
-    let mut line_heights = Vec::with_capacity(line_offsets.len());
-    let mut top = 0_usize;
-
-    for row_index in 0..line_offsets.len() {
-        line_tops.push(top);
-        let line_len = text_line_byte_len(text, line_offsets, row_index);
-        let visual_rows = line_len.max(1).div_ceil(chars_per_row).max(1);
-        let height = visual_rows.saturating_mul(TEXT_ROW_HEIGHT);
-        line_heights.push(height);
-        top = top.saturating_add(height);
+async fn responsive_text_wrap_layout(
+    buffer: IdentityArc<TextBuffer>,
+    viewport_width: usize,
+    generation_signal: Signal<u64>,
+    generation: u64,
+) -> Option<TextWrapLayout> {
+    let line_count = buffer.line_count();
+    let mut builder = TextWrapLayoutBuilder::new(line_count, viewport_width);
+    for row_index in 0..line_count {
+        if row_index > 0 && row_index % TEXT_WRAP_LAYOUT_BATCH_LINES == 0 {
+            platform::sleep_ms(0).await;
+            if *generation_signal.peek() != generation {
+                return None;
+            }
+        }
+        builder.push_line(buffer.line_byte_len(row_index).unwrap_or(0));
     }
-
-    TextWrapLayout {
-        line_tops: Arc::new(line_tops),
-        line_heights: Arc::new(line_heights),
-        logical_height: top,
-    }
+    Some(builder.finish())
 }
 
 fn text_wrap_chars_per_row(viewport_width: usize) -> usize {
@@ -835,21 +921,6 @@ fn text_wrap_chars_per_row(viewport_width: usize) -> usize {
         .checked_div(TEXT_WRAP_CHAR_WIDTH)
         .unwrap_or(1)
         .max(1)
-}
-
-fn text_line_byte_len(text: &str, line_offsets: &[usize], row_index: usize) -> usize {
-    let Some(start) = line_offsets.get(row_index).copied() else {
-        return 0;
-    };
-    let mut end = line_offsets
-        .get(row_index + 1)
-        .copied()
-        .map(|offset| offset.saturating_sub(1))
-        .unwrap_or(text.len());
-    if end > start && text.as_bytes().get(end.saturating_sub(1)) == Some(&b'\r') {
-        end = end.saturating_sub(1);
-    }
-    end.saturating_sub(start)
 }
 
 fn wrapped_text_scroll(
@@ -1090,39 +1161,6 @@ fn is_primary_mouse_button(event: &MouseEvent) -> bool {
     matches!(event.trigger_button(), None | Some(MouseButton::Primary))
 }
 
-fn virtual_text_selection_from_points(
-    anchor: VirtualTextPoint,
-    focus: VirtualTextPoint,
-) -> VirtualTextSelection {
-    VirtualTextSelection {
-        start_line: anchor.line_index,
-        start_column_utf16: anchor.column_utf16,
-        end_line: focus.line_index,
-        end_column_utf16: focus.column_utf16,
-    }
-}
-
-fn virtual_text_selection_from_distinct_points(
-    anchor: VirtualTextPoint,
-    focus: VirtualTextPoint,
-) -> Option<VirtualTextSelection> {
-    (anchor != focus).then(|| virtual_text_selection_from_points(anchor, focus))
-}
-
-fn virtual_text_selection_anchor(selection: VirtualTextSelection) -> VirtualTextPoint {
-    VirtualTextPoint {
-        line_index: selection.start_line,
-        column_utf16: selection.start_column_utf16,
-    }
-}
-
-fn virtual_text_selection_focus(selection: VirtualTextSelection) -> VirtualTextPoint {
-    VirtualTextPoint {
-        line_index: selection.end_line,
-        column_utf16: selection.end_column_utf16,
-    }
-}
-
 fn virtual_text_click_column_utf16(x: f64, line_text: &str) -> usize {
     const LINE_PADDING_LEFT: f64 = 12.0;
     const MONOSPACE_CHAR_WIDTH: f64 = 7.8;
@@ -1135,10 +1173,6 @@ fn virtual_text_click_column_utf16(x: f64, line_text: &str) -> usize {
     column
         .max(0.0)
         .min(virtual_text_utf16_len(line_text) as f64) as usize
-}
-
-fn virtual_text_utf16_len(text: &str) -> usize {
-    text.chars().map(char::len_utf16).sum()
 }
 
 fn focus_virtual_text_input_layer() {
@@ -1567,11 +1601,7 @@ fn virtual_text_previous_point(
 ) -> Option<VirtualTextPoint> {
     let point = clamp_virtual_text_point(point, buffer);
     if point.column_utf16 > 0 {
-        let line = text_line_at(
-            buffer.text.as_ref(),
-            buffer.line_offsets.as_ref(),
-            point.line_index,
-        )?;
+        let line = buffer.line_text(point.line_index)?;
         return Some(VirtualTextPoint {
             line_index: point.line_index,
             column_utf16: virtual_text_previous_utf16_column(&line, point.column_utf16),
@@ -1594,11 +1624,7 @@ fn virtual_text_next_point(
     let point = clamp_virtual_text_point(point, buffer);
     let line_len = virtual_text_line_utf16_len(buffer, point.line_index);
     if point.column_utf16 < line_len {
-        let line = text_line_at(
-            buffer.text.as_ref(),
-            buffer.line_offsets.as_ref(),
-            point.line_index,
-        )?;
+        let line = buffer.line_text(point.line_index)?;
         return Some(VirtualTextPoint {
             line_index: point.line_index,
             column_utf16: virtual_text_next_utf16_column(&line, point.column_utf16),
@@ -1782,16 +1808,6 @@ fn write_virtual_text_clipboard(text: &str) {
     ));
 }
 
-fn virtual_text_selected_text(
-    buffer: &TextBuffer,
-    selection: VirtualTextSelection,
-) -> Option<String> {
-    let (start, _, end, _) = normalized_virtual_text_selection_points(selection);
-    let start = virtual_text_point_to_byte_offset(buffer, start)?;
-    let end = virtual_text_point_to_byte_offset(buffer, end)?;
-    (start < end).then(|| buffer.text[start..end].to_string())
-}
-
 fn virtual_text_line_pieces(
     selection: Option<VirtualTextSelection>,
     caret: VirtualTextPoint,
@@ -1860,201 +1876,6 @@ fn push_virtual_text_piece(pieces: &mut Vec<VirtualTextLinePiece>, piece: Virtua
     }
 }
 
-fn virtual_text_line_selection_columns(
-    selection: Option<VirtualTextSelection>,
-    line_index: usize,
-    line_text: &str,
-) -> Option<(usize, usize)> {
-    let selection = selection?;
-    let (start_line, start_column, end_line, end_column) =
-        normalize_virtual_text_selection(selection);
-    if line_index < start_line || line_index > end_line {
-        return None;
-    }
-
-    let start = if line_index == start_line {
-        virtual_text_utf16_column_to_byte(line_text, start_column)
-    } else {
-        0
-    };
-    let end = if line_index == end_line {
-        virtual_text_utf16_column_to_byte(line_text, end_column)
-    } else {
-        line_text.len()
-    };
-    (start < end).then_some((start, end))
-}
-
-fn normalize_virtual_text_selection(
-    selection: VirtualTextSelection,
-) -> (usize, usize, usize, usize) {
-    let start = (selection.start_line, selection.start_column_utf16);
-    let end = (selection.end_line, selection.end_column_utf16);
-    if start <= end {
-        (
-            selection.start_line,
-            selection.start_column_utf16,
-            selection.end_line,
-            selection.end_column_utf16,
-        )
-    } else {
-        (
-            selection.end_line,
-            selection.end_column_utf16,
-            selection.start_line,
-            selection.start_column_utf16,
-        )
-    }
-}
-
-fn normalized_virtual_text_selection_points(
-    selection: VirtualTextSelection,
-) -> (VirtualTextPoint, usize, VirtualTextPoint, usize) {
-    let (start_line, start_column, end_line, end_column) =
-        normalize_virtual_text_selection(selection);
-    (
-        VirtualTextPoint {
-            line_index: start_line,
-            column_utf16: start_column,
-        },
-        start_column,
-        VirtualTextPoint {
-            line_index: end_line,
-            column_utf16: end_column,
-        },
-        end_column,
-    )
-}
-
-fn clamp_virtual_text_selection(
-    selection: VirtualTextSelection,
-    buffer: &TextBuffer,
-) -> Option<VirtualTextSelection> {
-    let anchor = clamp_virtual_text_point(virtual_text_selection_anchor(selection), buffer);
-    let focus = clamp_virtual_text_point(virtual_text_selection_focus(selection), buffer);
-    virtual_text_selection_from_distinct_points(anchor, focus)
-}
-
-fn clamp_virtual_text_point(point: VirtualTextPoint, buffer: &TextBuffer) -> VirtualTextPoint {
-    if buffer.line_count() == 0 {
-        return VirtualTextPoint {
-            line_index: 0,
-            column_utf16: 0,
-        };
-    }
-    let line_index = point.line_index.min(buffer.line_count().saturating_sub(1));
-    VirtualTextPoint {
-        line_index,
-        column_utf16: point
-            .column_utf16
-            .min(virtual_text_line_utf16_len(buffer, line_index)),
-    }
-}
-
-fn virtual_text_document_end_point(buffer: &TextBuffer) -> VirtualTextPoint {
-    if buffer.line_count() == 0 {
-        return VirtualTextPoint {
-            line_index: 0,
-            column_utf16: 0,
-        };
-    }
-    let line_index = buffer.line_count() - 1;
-    VirtualTextPoint {
-        line_index,
-        column_utf16: virtual_text_line_utf16_len(buffer, line_index),
-    }
-}
-
-fn virtual_text_line_utf16_len(buffer: &TextBuffer, line_index: usize) -> usize {
-    text_line_at(
-        buffer.text.as_ref(),
-        buffer.line_offsets.as_ref(),
-        line_index,
-    )
-    .map(|line| virtual_text_utf16_len(&line))
-    .unwrap_or(0)
-}
-
-fn virtual_text_point_from_jump_target(
-    buffer: &TextBuffer,
-    line: usize,
-    byte_column: usize,
-) -> VirtualTextPoint {
-    let line_index = line
-        .saturating_sub(1)
-        .min(buffer.line_count().saturating_sub(1));
-    let line_text = text_line_at(
-        buffer.text.as_ref(),
-        buffer.line_offsets.as_ref(),
-        line_index,
-    )
-    .unwrap_or_default();
-    clamp_virtual_text_point(
-        VirtualTextPoint {
-            line_index,
-            column_utf16: virtual_text_byte_column_to_utf16(&line_text, byte_column),
-        },
-        buffer,
-    )
-}
-
-fn virtual_text_byte_column_to_utf16(text: &str, byte_column: usize) -> usize {
-    let bounded = byte_column.min(text.len());
-    let mut utf16_offset = 0_usize;
-    for (byte_offset, ch) in text.char_indices() {
-        if byte_offset >= bounded {
-            return utf16_offset;
-        }
-        let next_byte = byte_offset.saturating_add(ch.len_utf8());
-        if next_byte > bounded {
-            return utf16_offset;
-        }
-        utf16_offset = utf16_offset.saturating_add(ch.len_utf16());
-    }
-    utf16_offset
-}
-
-fn virtual_text_point_to_byte_offset(
-    buffer: &TextBuffer,
-    point: VirtualTextPoint,
-) -> Option<usize> {
-    let point = clamp_virtual_text_point(point, buffer);
-    let text = buffer.text.as_ref();
-    let start = *buffer.line_offsets.get(point.line_index)?;
-    let full_end = buffer
-        .line_offsets
-        .get(point.line_index + 1)
-        .copied()
-        .unwrap_or(text.len());
-    let content_end = virtual_text_line_content_end(text, start, full_end);
-    let line = &text[start..content_end];
-    Some(start + virtual_text_utf16_column_to_byte(line, point.column_utf16))
-}
-
-fn virtual_text_line_content_end(text: &str, start: usize, full_end: usize) -> usize {
-    let bytes = text.as_bytes();
-    let mut end = full_end;
-    if end > start && bytes.get(end - 1) == Some(&b'\n') {
-        end -= 1;
-        if end > start && bytes.get(end - 1) == Some(&b'\r') {
-            end -= 1;
-        }
-    }
-    end
-}
-
-fn virtual_text_utf16_column_to_byte(text: &str, column_utf16: usize) -> usize {
-    let mut utf16_offset = 0_usize;
-    for (byte_offset, ch) in text.char_indices() {
-        let next_utf16_offset = utf16_offset.saturating_add(ch.len_utf16());
-        if next_utf16_offset > column_utf16 {
-            return byte_offset;
-        }
-        utf16_offset = next_utf16_offset;
-    }
-    text.len()
-}
-
 #[cfg(test)]
 mod tests {
     use crate::domain::TEXT_ROW_HEIGHT;
@@ -2071,12 +1892,23 @@ mod tests {
     #[test]
     fn text_wrap_layout_expands_long_lines_for_narrow_viewports() {
         let text = format!("short\n{}", "a".repeat(200));
-        let layout = text_wrap_layout(&text, &[0, 6], 220);
+        let buffer = TextBuffer::new(text);
+        let layout = text_wrap_layout(&buffer, 220);
 
         assert_eq!(layout.line_tops.as_slice(), &[0, TEXT_ROW_HEIGHT]);
         assert_eq!(layout.line_heights[0], TEXT_ROW_HEIGHT);
         assert!(layout.line_heights[1] > TEXT_ROW_HEIGHT);
         assert!(layout.logical_height > TEXT_ROW_HEIGHT * 2);
+    }
+
+    #[test]
+    fn text_wrap_layout_covers_documents_above_the_previous_limit() {
+        let buffer = TextBuffer::new("line\n".repeat(20_001));
+        let layout = text_wrap_layout(&buffer, 320);
+
+        assert_eq!(layout.line_tops.len(), 20_001);
+        assert_eq!(layout.line_heights.len(), 20_001);
+        assert_eq!(layout.logical_height, TEXT_ROW_HEIGHT * 20_001);
     }
 
     #[test]

@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{DecodedDocument, EncodeOptions, TextFormat, encode_rton_bytes, value_to_text};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BatchExportMode {
     Rton,
     Json,

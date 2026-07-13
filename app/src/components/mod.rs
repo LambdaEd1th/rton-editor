@@ -1,3 +1,4 @@
+pub(crate) mod context_menu_transition;
 pub(crate) mod file_list;
 pub(crate) mod hex_editor;
 pub(crate) mod panels;

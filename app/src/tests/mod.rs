@@ -54,8 +54,12 @@ fn install_test_i18n() {
 fn tab(id: usize) -> EditorTabState {
     EditorTabState {
         id,
+        content_revision: 0,
         file_name: format!("sample-{id}.json"),
         doc: None,
+        stats: None,
+        worker_document_id: None,
+        worker_surface_mode: None,
         byte_doc: None,
         source_encode_options: EncodeOptions::default(),
         tree_rows: empty_tree_rows(),

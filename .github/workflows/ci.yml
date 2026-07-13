@@ -38,6 +38,13 @@ jobs:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
 
+      - name: Setup nightly WASM threads toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-07-01
+          components: rust-src
+          targets: wasm32-unknown-unknown
+
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
@@ -49,6 +56,11 @@ jobs:
 
       - name: Check wasm
         run: cargo check --workspace --target wasm32-unknown-unknown
+
+      - name: Check threaded worker
+        env:
+          RUSTFLAGS: -C target-feature=+atomics,+bulk-memory
+        run: cargo +nightly-2025-07-01 check -Z build-std=panic_abort,std --target wasm32-unknown-unknown --package rton_editor_worker --features wasm-threads
 
       - name: Test
         run: cargo test --workspace --all-targets
@@ -68,6 +80,13 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Setup nightly WASM threads toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-07-01
+          components: rust-src
+          targets: wasm32-unknown-unknown
+
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
@@ -82,6 +101,12 @@ jobs:
           if ! command -v dx >/dev/null 2>&1 || ! dx --version | grep -q "dioxus ${DX_VERSION}"; then
             cargo install dioxus-cli --version "${DX_VERSION}" --locked
           fi
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+
+      - name: Build Web Workers
+        run: ./scripts/build-web-workers.sh
 
       - name: Build web
         run: dx build --platform web --package rton-editor-app --release --debug-symbols=false

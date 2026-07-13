@@ -4,7 +4,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 use crate::domain::{
-    FILE_LIST_DEFAULT_VIEWPORT_HEIGHT, FILE_LIST_ROW_HEIGHT, FileListVirtualScroll,
+    FILE_LIST_DEFAULT_VIEWPORT_HEIGHT, FILE_LIST_ROW_HEIGHT, FileListVirtualScroll, IdentityArc,
     file_list_virtual_row_top, file_list_virtual_scroll, measured_file_list_viewport_height,
 };
 use crate::i18n::I18n;
@@ -14,7 +14,7 @@ use super::{FileListItem, FileListRow, FileSelection};
 
 #[component]
 pub(crate) fn FileList(
-    items: Arc<Vec<FileListItem>>,
+    items: IdentityArc<Vec<FileListItem>>,
     selection: FileSelection,
     empty_message: String,
     i18n: I18n,
@@ -31,7 +31,17 @@ pub(crate) fn FileList(
     let mut mounted = use_signal(|| None::<MountedEvent>);
     let mut collapsed_paths = use_signal(HashSet::<String>::new);
     let collapsed_snapshot = collapsed_paths.read().clone();
-    let rows = build_file_list_rows(&items, &selection, &collapsed_snapshot);
+    let rows = use_memo(use_reactive(
+        &(items.clone(), selection.clone(), collapsed_snapshot),
+        move |(items, selection, collapsed_paths)| {
+            Arc::new(build_file_list_rows(
+                items.as_ref(),
+                &selection,
+                &collapsed_paths,
+            ))
+        },
+    ));
+    let rows = rows.read().clone();
     let row_count = rows.len();
     let scroll_top_snapshot = *scroll_top.read();
     let viewport_height_snapshot = *viewport_height.read();

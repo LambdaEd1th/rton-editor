@@ -171,10 +171,10 @@ pub(super) fn file_data_web_file(file: &FileData) -> Option<web_sys::File> {
 
 pub(super) fn web_file_size(file: &web_sys::File) -> Option<usize> {
     let size = file.size();
-    (size.is_finite() && size >= 0.0).then(|| size as usize)
+    (size.is_finite() && size >= 0.0).then_some(size as usize)
 }
 
-pub(super) async fn read_web_file_bytes(file: &web_sys::File) -> Result<Vec<u8>, String> {
+pub(crate) async fn read_web_file_bytes(file: &web_sys::File) -> Result<Vec<u8>, String> {
     use wasm_bindgen::JsCast;
 
     let blob = wasm_bindgen::JsValue::from(file.clone())

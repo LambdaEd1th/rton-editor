@@ -6,7 +6,8 @@ use crate::domain::{
 };
 
 use super::state::{
-    ByteSelection, HEX_INSPECTOR_MAX_WIDTH, HEX_INSPECTOR_MIN_WIDTH, PendingHexEdit,
+    ByteSelection, HEX_BYTES_PER_ROW, HEX_COMPACT_BYTES_PER_ROW, HEX_COMPACT_LAYOUT_MAX_WIDTH,
+    HEX_INSPECTOR_MAX_WIDTH, HEX_INSPECTOR_MIN_WIDTH, PendingHexEdit,
 };
 
 #[derive(Clone, Copy)]
@@ -21,6 +22,21 @@ pub(super) fn update_hex_viewport_height(mut viewport_height: Signal<usize>, hei
     let next = measured_hex_viewport_height(height);
     if next != *viewport_height.read() {
         viewport_height.set(next);
+    }
+}
+
+pub(super) fn update_hex_bytes_per_row(mut bytes_per_row: Signal<usize>, width: f64) {
+    let next = responsive_hex_bytes_per_row(width);
+    if next != *bytes_per_row.read() {
+        bytes_per_row.set(next);
+    }
+}
+
+fn responsive_hex_bytes_per_row(width: f64) -> usize {
+    if width.is_finite() && width <= HEX_COMPACT_LAYOUT_MAX_WIDTH {
+        HEX_COMPACT_BYTES_PER_ROW
+    } else {
+        HEX_BYTES_PER_ROW
     }
 }
 
@@ -357,4 +373,17 @@ pub(super) fn clamp_hex_inspector_width(width: f64) -> i32 {
         HEX_INSPECTOR_MIN_WIDTH as f64,
         HEX_INSPECTOR_MAX_WIDTH as f64,
     ) as i32
+}
+
+#[cfg(test)]
+mod responsive_layout_tests {
+    use super::responsive_hex_bytes_per_row;
+
+    #[test]
+    fn hex_rows_compact_only_for_narrow_finite_widths() {
+        assert_eq!(responsive_hex_bytes_per_row(390.0), 8);
+        assert_eq!(responsive_hex_bytes_per_row(560.0), 8);
+        assert_eq!(responsive_hex_bytes_per_row(561.0), 16);
+        assert_eq!(responsive_hex_bytes_per_row(f64::NAN), 16);
+    }
 }

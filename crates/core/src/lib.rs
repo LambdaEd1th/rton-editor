@@ -8,7 +8,9 @@ mod formats;
 mod rton;
 mod rton_inspector;
 mod scalar_edit;
+mod surface_search;
 mod text;
+mod text_locator;
 mod value_path;
 mod value_tree;
 mod worker_protocol;
@@ -33,7 +35,12 @@ pub use rton_inspector::{
     maybe_collect_string_tables, read_rton_varint, rton_tag_info,
 };
 pub use scalar_edit::{edit_value_at_path, parse_scalar_edit, scalar_edit_text};
+pub use surface_search::{
+    HexSearchMatch, HexSearchResult, SURFACE_SEARCH_MATCH_LIMIT, TextSearchMatch, TextSearchResult,
+    find_hex_search_result, find_text_search_result,
+};
 pub use text::{TextRender, parse_text, value_to_text, value_to_text_limited};
+pub use text_locator::{TextPosition, locate_value_path_in_text, offset_to_text_position};
 pub use value_path::{
     ValuePathSegment, parse_value_path_segments, replace_value_at_path, value_at_path,
 };
@@ -42,11 +49,20 @@ pub use value_tree::{
     flatten_expanded_value_tree, flatten_value_tree, search_value_tree, value_kind, value_preview,
 };
 pub use worker_protocol::{
-    WorkerDocumentSource, WorkerEditorMode, WorkerModeSwitchRequest, WorkerModeSwitchResponse,
-    WorkerOpenTextRequest, WorkerOpenTextResponse, WorkerParseRequest, WorkerParseResponse,
-    WorkerRtonSizeRequest, WorkerRtonSizeResponse, WorkerSurface, WorkerTextSurfaceRequest,
-    WorkerTextSurfaceResponse, perform_worker_mode_switch, perform_worker_open_text,
-    perform_worker_parse, perform_worker_rton_size, perform_worker_text_surface,
+    WorkerBatchItemResponse, WorkerBatchJob, WorkerBatchRequest, WorkerBatchResponse,
+    WorkerBatchSource, WorkerDocumentSource, WorkerEditorMode, WorkerHexSearchRequest,
+    WorkerHexSearchResponse, WorkerLocateTextRequest, WorkerLocateTextResponse,
+    WorkerModeSwitchOutcome, WorkerModeSwitchRequest, WorkerModeSwitchResponse,
+    WorkerOpenTextOutcome, WorkerOpenTextRequest, WorkerOpenTextResponse, WorkerParseOutcome,
+    WorkerParseRequest, WorkerParseResponse, WorkerReleaseDocumentRequest,
+    WorkerReleaseDocumentResponse, WorkerRtonSizeRequest, WorkerRtonSizeResponse, WorkerSurface,
+    WorkerSurfaceSearchSource, WorkerTextSearchRequest, WorkerTextSearchResponse,
+    WorkerTextSurfaceRequest, WorkerTextSurfaceResponse, WorkerTreeRequest, WorkerTreeResponse,
+    WorkerValueSearchRequest, WorkerValueSearchResponse, decode_worker_document_source,
+    perform_worker_hex_search, perform_worker_locate_text, perform_worker_mode_switch,
+    perform_worker_mode_switch_for_document, perform_worker_open_text, perform_worker_parse,
+    perform_worker_parse_for_document, perform_worker_rton_size,
+    perform_worker_rton_size_for_document, perform_worker_text_search, perform_worker_text_surface,
 };
 
 #[cfg(test)]

@@ -1,13 +1,22 @@
 use dioxus::prelude::*;
 use rton_editor_core::format_bytes;
 
+use crate::components::context_menu_transition::{dismiss_context_menu, show_context_menu};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::domain::find_hex_search_result;
 use crate::domain::{
-    ByteDocument, HexEdit, HexSearchMode, HexSearchResult, find_hex_search_result,
-    hex_scroll_top_for_row, parse_search_pattern, relative_search_match, replace_all_byte_edits,
+    ByteDocument, HexEdit, HexSearchMode, HexSearchResult, hex_scroll_top_for_row,
+    parse_search_pattern, relative_search_match, replace_all_byte_edits,
 };
 use crate::i18n::I18n;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::platform::run_cpu_task;
+#[cfg(target_arch = "wasm32")]
+use crate::platform::run_hex_search_worker;
+#[cfg(target_arch = "wasm32")]
+use rton_editor_core::{WorkerHexSearchRequest, WorkerSurfaceSearchSource};
 
+mod clipboard;
 mod inspector;
 mod keyboard;
 mod logic;
@@ -18,15 +27,14 @@ mod state;
 
 pub(crate) use state::HexJumpTarget;
 
+use clipboard::{format_hex_clipboard_text, parse_hex_clipboard_text};
 use inspector::HexByteInspector;
 use keyboard::handle_hex_key;
 use logic::*;
 use row::HexRow;
 use search_panel::HexSearchPanel;
 use snapshot::hex_editor_snapshot;
-use state::{
-    ByteSelection, HEX_BYTES_PER_ROW, HexInspectorResizeDrag, HexPane, use_hex_editor_signals,
-};
+use state::{ByteSelection, HexInspectorResizeDrag, HexPane, use_hex_editor_signals};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct HexContextMenu {
@@ -37,6 +45,7 @@ pub(super) struct HexContextMenu {
 #[component]
 pub(crate) fn HexEditor(
     bytes: ByteDocument,
+    worker_document_id: Option<u64>,
     jump_target: Option<HexJumpTarget>,
     search_panel_visible: bool,
     i18n: I18n,
@@ -56,6 +65,7 @@ pub(crate) fn HexEditor(
     let mut pointer_selecting = hex_signals.pointer_selecting;
     let mut scroll_top = hex_signals.scroll_top;
     let viewport_height = hex_signals.viewport_height;
+    let bytes_per_row = hex_signals.bytes_per_row;
     let mut inspector_width = hex_signals.inspector_width;
     let mut inspector_drag = hex_signals.inspector_drag;
     let search_mode = hex_signals.search_mode;
@@ -67,7 +77,9 @@ pub(crate) fn HexEditor(
     let mut scroll_mounted = use_signal(|| None::<MountedEvent>);
     let mut editor_mounted = use_signal(|| None::<MountedEvent>);
     let mut input_sink_value = use_signal(String::new);
-    let mut context_menu = use_signal(|| None::<HexContextMenu>);
+    let context_menu = use_signal(|| None::<HexContextMenu>);
+    let context_menu_closing = use_signal(|| false);
+    let context_menu_generation = use_signal(|| 0_u64);
 
     let search_mode_input = *search_mode.read();
     let search_query_input = search_query.read().clone();
@@ -75,12 +87,20 @@ pub(crate) fn HexEditor(
     use_effect(use_reactive(
         (
             &bytes,
+            &worker_document_id,
             &search_panel_visible,
             &search_mode_input,
             &search_query_input,
             &case_sensitive_input,
         ),
-        move |(bytes_for_search, panel_visible, mode, query, case_sensitive)| {
+        move |(
+            bytes_for_search,
+            worker_document_id,
+            panel_visible,
+            mode,
+            query,
+            case_sensitive,
+        )| {
             let pattern = parse_search_pattern(mode, &query, i18n);
             if !panel_visible || !pattern.valid || pattern.bytes.is_empty() {
                 clear_hex_search_result(hex_search_result);
@@ -93,12 +113,15 @@ pub(crate) fn HexEditor(
             spawn(async move {
                 let ascii_insensitive = mode == HexSearchMode::Ascii && !case_sensitive;
                 let bytes = pattern.bytes;
-                let result = run_cpu_task(move || {
-                    find_hex_search_result(&bytes_for_search, &bytes, ascii_insensitive)
-                })
+                let result = run_hex_search_task(
+                    bytes_for_search,
+                    worker_document_id,
+                    bytes,
+                    ascii_insensitive,
+                )
                 .await;
                 if *hex_search_generation.peek() == generation {
-                    hex_search_result.set(result);
+                    hex_search_result.set(result.unwrap_or_else(|_| empty_hex_search_result()));
                 }
             });
         },
@@ -125,6 +148,7 @@ pub(crate) fn HexEditor(
         *insert_mode.read(),
         *scroll_top.read(),
         *viewport_height.read(),
+        *bytes_per_row.read(),
         *inspector_width.read(),
         search_panel_visible,
         *search_mode.read(),
@@ -144,6 +168,7 @@ pub(crate) fn HexEditor(
     let selected_byte = snapshot.selected_byte;
     let offset_width = snapshot.offset_width;
     let row_count = snapshot.row_count;
+    let bytes_per_row_snapshot = *bytes_per_row.read();
     let visible_rows = snapshot.visible_rows;
     let normalized_selection = snapshot.normalized_selection;
     let search_mode_snapshot = snapshot.search_mode;
@@ -164,6 +189,7 @@ pub(crate) fn HexEditor(
     let inspector_drag_snapshot = *inspector_drag.read();
     let inspector_width_snapshot = *inspector_width.read();
     let context_menu_snapshot = *context_menu.read();
+    let context_menu_closing_snapshot = *context_menu_closing.read();
     let context_menu_open = context_menu_snapshot.is_some();
 
     use_effect(use_reactive(&context_menu_open, move |open| {
@@ -185,7 +211,7 @@ pub(crate) fn HexEditor(
         selection_range.set(None);
         selected_offset.set(offset);
 
-        let target_row = offset / HEX_BYTES_PER_ROW;
+        let target_row = offset / bytes_per_row_snapshot.max(1);
         let target_scroll_top =
             hex_scroll_top_for_row(target_row, row_count, *viewport_height.read());
         scroll_top.set(target_scroll_top);
@@ -196,15 +222,16 @@ pub(crate) fn HexEditor(
     let handle_key = move |event: KeyboardEvent| {
         if event.key().to_string() == "Escape" && context_menu.peek().is_some() {
             event.prevent_default();
-            context_menu.set(None);
+            dismiss_context_menu(context_menu, context_menu_closing, context_menu_generation);
             return;
         }
-        context_menu.set(None);
+        dismiss_context_menu(context_menu, context_menu_closing, context_menu_generation);
         handle_hex_key(
             event,
             &bytes_for_key,
             bytes_len,
             safe_selected_offset,
+            bytes_per_row_snapshot,
             normalized_selection,
             insert_mode,
             active_pane,
@@ -220,7 +247,7 @@ pub(crate) fn HexEditor(
     };
 
     let mut update_selection_from_pointer = move |offset: usize, pane: HexPane, extend: bool| {
-        context_menu.set(None);
+        dismiss_context_menu(context_menu, context_menu_closing, context_menu_generation);
         active_pane.set(pane);
         pending_hex_edit.set(None);
         if extend {
@@ -252,9 +279,12 @@ pub(crate) fn HexEditor(
         selected_offset.set(offset);
         let mounted = editor_mounted.peek().clone();
         spawn(async move {
-            context_menu.set(Some(
+            show_context_menu(
+                context_menu,
+                context_menu_closing,
+                context_menu_generation,
                 hex_context_menu_from_client_position(menu, mounted).await,
-            ));
+            );
         });
     };
 
@@ -379,9 +409,27 @@ pub(crate) fn HexEditor(
             class: "rton-hex-editor",
             style: "{style}",
             tabindex: "0",
-            onmounted: move |event| editor_mounted.set(Some(event)),
+            onmounted: move |event| {
+                editor_mounted.set(Some(event.clone()));
+                async move {
+                    if let Ok(rect) = event.get_client_rect().await {
+                        update_hex_bytes_per_row(bytes_per_row, rect.width());
+                    }
+                }
+            },
+            onresize: move |event| {
+                if let Ok(size) = event.get_content_box_size() {
+                    update_hex_bytes_per_row(bytes_per_row, size.width);
+                }
+            },
             onkeydown: handle_key,
-            onmousedown: move |_| context_menu.set(None),
+            onmousedown: move |_| {
+                dismiss_context_menu(
+                    context_menu,
+                    context_menu_closing,
+                    context_menu_generation,
+                );
+            },
             onmouseup: move |_| {
                 pointer_selecting.set(false);
                 inspector_drag.set(None);
@@ -392,7 +440,13 @@ pub(crate) fn HexEditor(
                 class: "rton-hex-context-close-sink",
                 tabindex: "-1",
                 aria_hidden: "true",
-                onclick: move |_| context_menu.set(None)
+                onclick: move |_| {
+                    dismiss_context_menu(
+                        context_menu,
+                        context_menu_closing,
+                        context_menu_generation,
+                    );
+                }
             }
             textarea {
                 id: "rton-hex-input-sink",
@@ -405,7 +459,11 @@ pub(crate) fn HexEditor(
                 oninput: {
                     let bytes = bytes.clone();
                     move |event| {
-                        context_menu.set(None);
+                        dismiss_context_menu(
+                            context_menu,
+                            context_menu_closing,
+                            context_menu_generation,
+                        );
                         let text = event.value();
                         input_sink_value.set(String::new());
                         paste_hex_text_from_clipboard(
@@ -462,7 +520,7 @@ pub(crate) fn HexEditor(
                     div { class: "rton-hex-header", aria_hidden: "true",
                         span { class: "rton-hex-offset", "OFFSET" }
                         div { class: "rton-hex-grid",
-                            for column in 0..HEX_BYTES_PER_ROW {
+                            for column in 0..bytes_per_row_snapshot {
                                 span { class: "rton-hex-column-label", "{column:02X}" }
                             }
                         }
@@ -471,7 +529,11 @@ pub(crate) fn HexEditor(
                     div {
                         class: "rton-hex-scroll",
                         onwheel: move |_| {
-                            context_menu.set(None);
+                            dismiss_context_menu(
+                                context_menu,
+                                context_menu_closing,
+                                context_menu_generation,
+                            );
                             pointer_selecting.set(false);
                         },
                         onmounted: move |event| {
@@ -491,7 +553,11 @@ pub(crate) fn HexEditor(
                             }
                         },
                         onscroll: move |event| {
-                            context_menu.set(None);
+                            dismiss_context_menu(
+                                context_menu,
+                                context_menu_closing,
+                                context_menu_generation,
+                            );
                             pointer_selecting.set(false);
                             scroll_top.set(event.scroll_top());
                         },
@@ -503,6 +569,7 @@ pub(crate) fn HexEditor(
                                     bytes: bytes.clone(),
                                     row_index,
                                     row_top,
+                                    bytes_per_row: bytes_per_row_snapshot,
                                     offset_width,
                                     selected_offset: safe_selected_offset,
                                     normalized_selection,
@@ -577,15 +644,23 @@ pub(crate) fn HexEditor(
                     class: "rton-hex-context-backdrop",
                     onmousedown: move |event| {
                         event.prevent_default();
-                        context_menu.set(None);
+                        dismiss_context_menu(
+                            context_menu,
+                            context_menu_closing,
+                            context_menu_generation,
+                        );
                     },
                     oncontextmenu: move |event| {
                         event.prevent_default();
-                        context_menu.set(None);
+                        dismiss_context_menu(
+                            context_menu,
+                            context_menu_closing,
+                            context_menu_generation,
+                        );
                     }
                 }
                 div {
-                    class: "rton-hex-context-menu",
+                    class: if context_menu_closing_snapshot { "rton-hex-context-menu closing" } else { "rton-hex-context-menu" },
                     role: "menu",
                     style: "left: {menu.x}px; top: {menu.y}px",
                     onmousedown: move |event| {
@@ -604,7 +679,11 @@ pub(crate) fn HexEditor(
                                     safe_selected_offset,
                                     *active_pane.read(),
                                 );
-                                context_menu.set(None);
+                                dismiss_context_menu(
+                                    context_menu,
+                                    context_menu_closing,
+                                    context_menu_generation,
+                                );
                                 focus_hex_editor();
                             }
                         },
@@ -624,7 +703,11 @@ pub(crate) fn HexEditor(
                                     *insert_mode.read(),
                                     hex_signals.commit_targets(on_change),
                                 );
-                                context_menu.set(None);
+                                dismiss_context_menu(
+                                    context_menu,
+                                    context_menu_closing,
+                                    context_menu_generation,
+                                );
                                 focus_hex_editor();
                             }
                         },
@@ -634,7 +717,11 @@ pub(crate) fn HexEditor(
                         r#type: "button",
                         role: "menuitem",
                         onclick: move |_| {
-                            context_menu.set(None);
+                            dismiss_context_menu(
+                                context_menu,
+                                context_menu_closing,
+                                context_menu_generation,
+                            );
                             paste_hex_from_clipboard();
                         },
                         {i18n.t("editor-context-paste")}
@@ -645,7 +732,11 @@ pub(crate) fn HexEditor(
                         role: "menuitem",
                         onclick: move |_| {
                             select_all_hex_bytes(bytes_len, selection_anchor, selection_range, selected_offset);
-                            context_menu.set(None);
+                            dismiss_context_menu(
+                                context_menu,
+                                context_menu_closing,
+                                context_menu_generation,
+                            );
                             focus_hex_editor();
                         },
                         {i18n.t("editor-context-select-all")}
@@ -653,6 +744,44 @@ pub(crate) fn HexEditor(
                 }
             }
         }
+    }
+}
+
+async fn run_hex_search_task(
+    bytes: ByteDocument,
+    worker_document_id: Option<u64>,
+    pattern: Vec<u8>,
+    ascii_insensitive: bool,
+) -> Result<HexSearchResult, String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let source = worker_document_id.map_or_else(
+            || WorkerSurfaceSearchSource::Bytes(bytes.as_cow().into_owned()),
+            WorkerSurfaceSearchSource::DocumentId,
+        );
+        let response = run_hex_search_worker(WorkerHexSearchRequest {
+            source,
+            pattern,
+            ascii_insensitive,
+        })
+        .await?;
+        Ok(HexSearchResult {
+            matches: response
+                .result
+                .matches
+                .into_iter()
+                .map(|match_| crate::domain::HexSearchMatch {
+                    offset: match_.offset,
+                    length: match_.length,
+                })
+                .collect(),
+            capped: response.result.capped,
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = worker_document_id;
+        Ok(run_cpu_task(move || find_hex_search_result(&bytes, &pattern, ascii_insensitive)).await)
     }
 }
 
@@ -748,17 +877,6 @@ fn selected_hex_target_and_bytes(
     Some((target, selected))
 }
 
-fn format_hex_clipboard_text(bytes: &[u8], pane: HexPane) -> String {
-    match pane {
-        HexPane::Hex => bytes
-            .iter()
-            .map(|byte| format!("{byte:02X}"))
-            .collect::<Vec<_>>()
-            .join(" "),
-        HexPane::Ascii => bytes.iter().map(|byte| *byte as char).collect(),
-    }
-}
-
 fn paste_hex_text_from_clipboard(
     bytes: &ByteDocument,
     text: String,
@@ -782,43 +900,6 @@ fn paste_hex_text_from_clipboard(
         return;
     };
     commit_hex_write_target(bytes, target, values, insert_mode, commit_targets);
-}
-
-fn parse_hex_clipboard_text(text: &str, pane: HexPane) -> Option<Vec<u8>> {
-    match pane {
-        HexPane::Hex => parse_hex_bytes_text(text),
-        HexPane::Ascii => text
-            .chars()
-            .map(|ch| {
-                let code = ch as u32;
-                (code <= 0xff).then_some(code as u8)
-            })
-            .collect(),
-    }
-}
-
-fn parse_hex_bytes_text(text: &str) -> Option<Vec<u8>> {
-    let mut bytes = Vec::new();
-    for token in text.split(|ch: char| ch.is_ascii_whitespace() || ",;:-".contains(ch)) {
-        let token = token.trim();
-        if token.is_empty() {
-            continue;
-        }
-        let token = token
-            .strip_prefix("0x")
-            .or_else(|| token.strip_prefix("0X"))
-            .unwrap_or(token);
-        if token.is_empty()
-            || token.len() % 2 != 0
-            || !token.chars().all(|ch| ch.is_ascii_hexdigit())
-        {
-            return None;
-        }
-        for chunk_start in (0..token.len()).step_by(2) {
-            bytes.push(u8::from_str_radix(&token[chunk_start..chunk_start + 2], 16).ok()?);
-        }
-    }
-    (!bytes.is_empty()).then_some(bytes)
 }
 
 fn select_all_hex_bytes(

@@ -1,18 +1,17 @@
 use dioxus::prelude::*;
 use rton_editor_core::{TreeRows, ValueRow};
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::domain::{
-    VALUE_TREE_DEFAULT_VIEWPORT_HEIGHT, ValueTreeVirtualScroll,
+    IdentityArc, VALUE_TREE_DEFAULT_VIEWPORT_HEIGHT, ValueTreeVirtualScroll,
     measured_value_tree_viewport_height, value_tree_virtual_row_top, value_tree_virtual_scroll,
 };
 use crate::i18n::I18n;
 
 #[component]
 pub(crate) fn ValueTree(
-    rows: Arc<TreeRows>,
-    expanded_paths: Arc<HashSet<String>>,
+    rows: IdentityArc<TreeRows>,
+    expanded_paths: IdentityArc<HashSet<String>>,
     selected_path: String,
     i18n: I18n,
     on_select: EventHandler<String>,

@@ -1,6 +1,4 @@
-use rton_editor_core::RtonValue;
-
-use rton_editor_core::ValuePathSegment;
+use crate::{RtonValue, ValuePathSegment};
 
 use super::{TextLineInfo, TextPosition, ValuePathTraceSegment};
 
@@ -77,7 +75,7 @@ pub(super) fn key_forms(key: &str) -> Vec<String> {
     ]
 }
 
-pub(crate) fn offset_to_text_position(text: &str, offset: usize) -> TextPosition {
+pub fn offset_to_text_position(text: &str, offset: usize) -> TextPosition {
     let bounded_offset = offset.min(text.len());
     let mut line = 1usize;
     let mut line_start = 0usize;

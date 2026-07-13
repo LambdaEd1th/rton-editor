@@ -126,9 +126,11 @@ fn active_tab_text(
     active_tab_id: Signal<usize>,
 ) -> Option<String> {
     let active = active_tab(tabs, active_tab_id)?;
-    active
-        .mode
-        .text_format()
-        .is_some()
-        .then(|| active.editor_text.to_string())
+    active.mode.text_format().is_some().then(|| {
+        active
+            .text_buffer
+            .as_ref()
+            .map(|buffer| buffer.materialize())
+            .unwrap_or_else(|| active.editor_text.to_string())
+    })
 }

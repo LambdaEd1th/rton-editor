@@ -17,17 +17,25 @@ pub(crate) fn update_active_text(
 ) {
     let active_id = *active_tab_id.read();
     update_tab(tabs, active_id, |tab| {
-        if tab.editor_text.as_ref() == text.as_str() {
+        let current = tab
+            .text_buffer
+            .as_ref()
+            .map(|buffer| buffer.materialize())
+            .unwrap_or_else(|| tab.editor_text.to_string());
+        if current == text {
             return;
         }
-        if can_record_text_undo(tab.editor_text.as_ref(), &text) {
-            push_text_undo_snapshot(&mut tab.text_history, tab.editor_text.to_string());
+        if can_record_text_undo(&current, &text) {
+            push_text_undo_snapshot(&mut tab.text_history, current);
         } else {
             tab.text_history = TextHistory::default();
         }
         apply_text_surface(tab, text);
         tab.byte_doc = None;
         tab.doc = None;
+        tab.stats = None;
+        tab.worker_document_id = None;
+        tab.worker_surface_mode = None;
         tab.tree_rows = empty_tree_rows();
         tab.search_result = None;
         tab.text_cache.clear();
@@ -43,7 +51,7 @@ pub(crate) fn update_active_text_range(
     active_tab_id: Signal<usize>,
 ) {
     let active_id = *active_tab_id.read();
-    let outcome = {
+    let (base_revision, outcome) = {
         let tabs_snapshot = tabs.read();
         let Some(tab) = tabs_snapshot.iter().find(|tab| tab.id == active_id) else {
             return;
@@ -54,20 +62,20 @@ pub(crate) fn update_active_text_range(
         let Some(outcome) = text_with_replaced_range_and_history(buffer, &replacement) else {
             return;
         };
-        if tab.editor_text.as_ref() == outcome.next_text.as_str() {
-            return;
-        }
-        outcome
+        (tab.content_revision, outcome)
     };
 
     update_tab(tabs, active_id, |tab| {
-        if tab.editor_text.as_ref() == outcome.next_text.as_str() {
+        if tab.content_revision != base_revision {
             return;
         }
         push_text_undo_range(&mut tab.text_history, outcome.history);
-        apply_text_surface(tab, outcome.next_text);
+        apply_text_buffer(tab, outcome.next_buffer);
         tab.byte_doc = None;
         tab.doc = None;
+        tab.stats = None;
+        tab.worker_document_id = None;
+        tab.worker_surface_mode = None;
         tab.tree_rows = empty_tree_rows();
         tab.search_result = None;
         tab.text_cache.clear();
@@ -96,7 +104,11 @@ pub(crate) fn update_active_hex_edits(
 
         push_hex_undo_batch(&mut tab.hex_history, undo);
         tab.byte_doc = Some(byte_doc.apply_edits(&effective_edits));
+        bump_content_revision(tab);
         tab.doc = None;
+        tab.stats = None;
+        tab.worker_document_id = None;
+        tab.worker_surface_mode = None;
         tab.tree_rows = empty_tree_rows();
         tab.search_result = None;
         tab.editor_text = empty_editor_text();
@@ -147,7 +159,11 @@ pub(crate) fn undo_text_tab(tab: &mut EditorTabState) {
     };
     match previous {
         TextHistoryEntry::Snapshot(previous_text) => {
-            let current = tab.editor_text.to_string();
+            let current = tab
+                .text_buffer
+                .as_ref()
+                .map(|buffer| buffer.materialize())
+                .unwrap_or_else(|| tab.editor_text.to_string());
             apply_text_surface(tab, previous_text);
             push_text_redo_snapshot(&mut tab.text_history, current);
             clear_tab_parse_cache(tab);
@@ -170,7 +186,11 @@ pub(crate) fn redo_text_tab(tab: &mut EditorTabState) {
     };
     match next {
         TextHistoryEntry::Snapshot(next_text) => {
-            let current = tab.editor_text.to_string();
+            let current = tab
+                .text_buffer
+                .as_ref()
+                .map(|buffer| buffer.materialize())
+                .unwrap_or_else(|| tab.editor_text.to_string());
             apply_text_surface(tab, next_text);
             push_text_past_snapshot(&mut tab.text_history, current);
             clear_tab_parse_cache(tab);
@@ -197,6 +217,7 @@ pub(crate) fn undo_hex_tab(tab: &mut EditorTabState) {
     };
     let edits = previous.undo_edits();
     tab.byte_doc = Some(byte_doc.apply_edits(&edits));
+    bump_content_revision(tab);
     push_hex_redo_batch(&mut tab.hex_history, previous);
     clear_tab_parse_cache(tab);
     tab.editor_text = empty_editor_text();
@@ -215,6 +236,7 @@ pub(crate) fn redo_hex_tab(tab: &mut EditorTabState) {
     };
     let edits = next.redo_edits();
     tab.byte_doc = Some(byte_doc.apply_edits(&edits));
+    bump_content_revision(tab);
     push_hex_past_batch(&mut tab.hex_history, next);
     clear_tab_parse_cache(tab);
     tab.editor_text = empty_editor_text();
@@ -225,6 +247,9 @@ pub(crate) fn redo_hex_tab(tab: &mut EditorTabState) {
 
 pub(crate) fn clear_tab_parse_cache(tab: &mut EditorTabState) {
     tab.doc = None;
+    tab.stats = None;
+    tab.worker_document_id = None;
+    tab.worker_surface_mode = None;
     tab.tree_rows = empty_tree_rows();
     tab.search_result = None;
     tab.selected_path = "$".to_string();
@@ -234,6 +259,7 @@ pub(crate) fn clear_tab_parse_cache(tab: &mut EditorTabState) {
 }
 
 fn apply_text_surface(tab: &mut EditorTabState, text: String) {
+    bump_content_revision(tab);
     let Some(format) = tab.mode.text_format() else {
         tab.editor_text = std::sync::Arc::from(text);
         tab.text_buffer = None;
@@ -246,42 +272,61 @@ fn apply_text_surface(tab: &mut EditorTabState, text: String) {
     tab.text_state = surface.text_state;
 }
 
+fn apply_text_buffer(tab: &mut EditorTabState, buffer: TextBuffer) {
+    bump_content_revision(tab);
+    let Some(format) = tab.mode.text_format() else {
+        tab.editor_text = std::sync::Arc::from(buffer.materialize());
+        tab.text_buffer = None;
+        tab.text_state = crate::domain::TextContentState::None;
+        return;
+    };
+    let byte_count = buffer.byte_count();
+    let line_count = buffer.line_count();
+    tab.editor_text = empty_editor_text();
+    tab.text_buffer = Some(std::sync::Arc::new(buffer));
+    tab.text_state = crate::domain::TextContentState::Text {
+        byte_count,
+        line_count,
+        format,
+    };
+}
+
+fn bump_content_revision(tab: &mut EditorTabState) {
+    tab.content_revision = tab.content_revision.saturating_add(1);
+}
+
 fn apply_text_history_range(tab: &mut EditorTabState, replacement: &TextRangeReplacement) -> bool {
     let Some(buffer) = tab.text_buffer.as_ref() else {
         return false;
     };
-    let Some(next_text) = text_with_replaced_range(buffer, replacement) else {
+    let Some(next_buffer) = text_with_replaced_range_buffer(buffer, replacement) else {
         return false;
     };
-    apply_text_surface(tab, next_text);
+    apply_text_buffer(tab, next_buffer);
     clear_tab_parse_cache(tab);
     tab.byte_doc = None;
     tab.dirty = true;
     true
 }
 
-fn line_content_end(text: &str, start: usize, full_end: usize) -> usize {
-    let bytes = text.as_bytes();
-    let mut end = full_end;
-    if end > start && bytes.get(end - 1) == Some(&b'\n') {
-        end -= 1;
-        if end > start && bytes.get(end - 1) == Some(&b'\r') {
-            end -= 1;
-        }
-    }
-    end
-}
-
+#[cfg(test)]
 fn text_with_replaced_range(
     buffer: &TextBuffer,
     replacement: &TextRangeReplacement,
 ) -> Option<String> {
-    text_with_replaced_range_and_history(buffer, replacement).map(|outcome| outcome.next_text)
+    text_with_replaced_range_buffer(buffer, replacement).map(|buffer| buffer.materialize())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+fn text_with_replaced_range_buffer(
+    buffer: &TextBuffer,
+    replacement: &TextRangeReplacement,
+) -> Option<TextBuffer> {
+    text_with_replaced_range_and_history(buffer, replacement).map(|outcome| outcome.next_buffer)
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct TextRangeEditOutcome {
-    next_text: String,
+    next_buffer: TextBuffer,
     history: TextRangeHistoryEntry,
 }
 
@@ -289,7 +334,6 @@ fn text_with_replaced_range_and_history(
     buffer: &TextBuffer,
     replacement: &TextRangeReplacement,
 ) -> Option<TextRangeEditOutcome> {
-    let text = buffer.text.as_ref();
     let start = text_position_to_byte_offset(
         buffer,
         replacement.start_line,
@@ -316,19 +360,12 @@ fn text_with_replaced_range_and_history(
         return None;
     }
 
-    let deleted_text = text[start..end].to_string();
-    let mut next = String::with_capacity(
-        text.len()
-            .saturating_sub(end.saturating_sub(start))
-            .saturating_add(replacement.replacement.len()),
-    );
-    next.push_str(&text[..start]);
-    next.push_str(&replacement.replacement);
-    next.push_str(&text[end..]);
+    let deleted_text = buffer.byte_slice(start, end)?;
+    let next_buffer = buffer.replace_byte_range(start, end, &replacement.replacement)?;
 
     let undo_end_point = text_point_after_replacement(start_point, &replacement.replacement);
     Some(TextRangeEditOutcome {
-        next_text: next,
+        next_buffer,
         history: TextRangeHistoryEntry {
             undo: TextRangeReplacement {
                 start_line: start_point.0,
@@ -353,15 +390,8 @@ fn text_position_to_byte_offset(
     line_index: usize,
     column_utf16: usize,
 ) -> Option<usize> {
-    let text = buffer.text.as_ref();
-    let start = *buffer.line_offsets.get(line_index)?;
-    let full_end = buffer
-        .line_offsets
-        .get(line_index + 1)
-        .copied()
-        .unwrap_or(text.len());
-    let content_end = line_content_end(text, start, full_end);
-    let line = &text[start..content_end];
+    let start = buffer.line_start_byte(line_index)?;
+    let line = buffer.line_text(line_index)?;
     let mut utf16_offset = 0_usize;
 
     for (byte_offset, ch) in line.char_indices() {
@@ -372,7 +402,7 @@ fn text_position_to_byte_offset(
         utf16_offset = next_utf16_offset;
     }
 
-    Some(content_end)
+    Some(start + line.len())
 }
 
 fn text_point_after_replacement(start_point: (usize, usize), replacement: &str) -> (usize, usize) {
@@ -449,9 +479,9 @@ mod tests {
 
         let outcome = text_with_replaced_range_and_history(&buffer, &replacement)
             .expect("range edit outcome");
-        assert_eq!(outcome.next_text, "one\ntWo\nthree");
+        assert_eq!(outcome.next_buffer.materialize(), "one\ntWo\nthree");
 
-        let undo_buffer = TextBuffer::new(outcome.next_text.clone());
+        let undo_buffer = outcome.next_buffer.clone();
         assert_eq!(
             text_with_replaced_range(&undo_buffer, &outcome.history.undo).as_deref(),
             Some("one\ntwo\nthree")
@@ -477,13 +507,13 @@ mod tests {
 
         let outcome = text_with_replaced_range_and_history(&buffer, &replacement)
             .expect("range edit outcome");
-        assert_eq!(outcome.next_text, "a😀X\nY😀b\n中文c");
+        assert_eq!(outcome.next_buffer.materialize(), "a😀X\nY😀b\n中文c");
         assert_eq!(outcome.history.undo.start_line, 0);
         assert_eq!(outcome.history.undo.start_column_utf16, 3);
         assert_eq!(outcome.history.undo.end_line, 1);
         assert_eq!(outcome.history.undo.end_column_utf16, 3);
 
-        let undo_buffer = TextBuffer::new(outcome.next_text.clone());
+        let undo_buffer = outcome.next_buffer.clone();
         assert_eq!(
             text_with_replaced_range(&undo_buffer, &outcome.history.undo).as_deref(),
             Some("a😀b\n中文c")
@@ -494,8 +524,12 @@ mod tests {
     fn text_range_history_works_above_snapshot_limit() {
         let mut tab = EditorTabState {
             id: 1,
+            content_revision: 0,
             file_name: "large.json".to_string(),
             doc: None,
+            stats: None,
+            worker_document_id: None,
+            worker_surface_mode: None,
             byte_doc: None,
             source_encode_options: rton_editor_core::EncodeOptions::default(),
             tree_rows: empty_tree_rows(),
@@ -530,13 +564,21 @@ mod tests {
             text_with_replaced_range_and_history(tab.text_buffer.as_ref().unwrap(), &replacement)
                 .expect("range edit outcome");
         push_text_undo_range(&mut tab.text_history, outcome.history);
-        apply_text_surface(&mut tab, outcome.next_text);
+        apply_text_buffer(&mut tab, outcome.next_buffer);
 
         assert!(tab_can_undo(&tab));
         undo_text_tab(&mut tab);
-        assert!(tab.editor_text.starts_with('x'));
+        assert!(
+            tab.text_buffer
+                .as_ref()
+                .is_some_and(|buffer| buffer.materialize().starts_with('x'))
+        );
         assert!(tab_can_redo(&tab));
         redo_text_tab(&mut tab);
-        assert!(tab.editor_text.starts_with('y'));
+        assert!(
+            tab.text_buffer
+                .as_ref()
+                .is_some_and(|buffer| buffer.materialize().starts_with('y'))
+        );
     }
 }

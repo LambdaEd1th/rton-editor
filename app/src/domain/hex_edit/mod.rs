@@ -9,10 +9,11 @@ pub(crate) use edit::{HexEdit, edited_len_after_edits};
 pub(crate) use history::{
     HexHistory, prepare_hex_edits, push_hex_past_batch, push_hex_redo_batch, push_hex_undo_batch,
 };
+#[cfg(any(not(target_arch = "wasm32"), test))]
+pub(crate) use search::find_hex_search_result;
 pub(crate) use search::{
-    HexSearchMatch, HexSearchMode, HexSearchResult, find_containing_match, find_hex_search_result,
-    hex_search_status_text, parse_replace_pattern, parse_search_pattern, relative_search_match,
-    replace_all_byte_edits,
+    HexSearchMatch, HexSearchMode, HexSearchResult, find_containing_match, hex_search_status_text,
+    parse_replace_pattern, parse_search_pattern, relative_search_match, replace_all_byte_edits,
 };
 
 #[cfg(test)]

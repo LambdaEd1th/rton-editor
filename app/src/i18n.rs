@@ -31,10 +31,6 @@ impl Locale {
             .or_else(|| installed_locale_from_language(&normalized))
     }
 
-    pub fn from_code(code: &str) -> Self {
-        Self::supported_from_code(code).unwrap_or(Self::EN_US)
-    }
-
     pub fn code(self) -> &'static str {
         self.code
     }

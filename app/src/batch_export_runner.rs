@@ -1,28 +1,29 @@
 use dioxus::prelude::*;
-#[cfg(target_arch = "wasm32")]
-use rton_editor_core::DecodedDocument;
 use rton_editor_core::EncodeOptions;
-use std::collections::HashSet;
 #[cfg(target_arch = "wasm32")]
-use std::sync::Arc;
+use rton_editor_core::{SourceFormat, WorkerBatchJob, WorkerBatchRequest, WorkerBatchSource};
+#[cfg(target_arch = "wasm32")]
+use std::collections::HashMap;
+use std::collections::HashSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc;
 
 use crate::components::FileListItem;
 use crate::domain::{
-    BatchExportMode, EditorTabState, OpenTabError, Status, Tone, ZipArchiveBuilder,
-    batch_archive_name, batch_output_path, document_for_owned_tab, encode_batch_export_document,
-    unique_zip_path,
+    BatchExportMode, EditorTabState, Status, Tone, ZipArchiveBuilder, batch_archive_name,
+    batch_output_path, unique_zip_path,
 };
-use crate::file_import::LoadedFileState;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::domain::{OpenTabError, document_for_owned_tab, encode_batch_export_document};
 #[cfg(target_arch = "wasm32")]
-use crate::file_import::create_tab_from_loaded_file;
+use crate::file_import::LoadedFileSource;
+use crate::file_import::LoadedFileState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::file_import::document_from_loaded_file_sync;
 use crate::i18n::I18n;
 use crate::platform;
 #[cfg(target_arch = "wasm32")]
-use crate::platform::run_cpu_task;
+use crate::platform::run_batch_worker;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn batch_export_selected_files(
@@ -298,12 +299,87 @@ async fn run_batch_export_jobs(
 ) -> Vec<BatchExportItemResult> {
     let total = jobs.len();
     let mut results = Vec::with_capacity(total);
-    for job in jobs {
-        let index = job.index;
-        results.push(process_batch_export_job_async(job, mode, options).await);
-        if index % 24 == 23 || index + 1 == total {
-            set_batch_progress_status(status, i18n, mode, index + 1, total);
+    let mut jobs = jobs.into_iter();
+    let mut completed = 0usize;
+
+    loop {
+        let chunk = jobs.by_ref().take(32).collect::<Vec<_>>();
+        if chunk.is_empty() {
+            break;
         }
+
+        let chunk_len = chunk.len();
+        let mut metadata = HashMap::with_capacity(chunk_len);
+        let mut worker_jobs = Vec::with_capacity(chunk_len);
+        for job in chunk {
+            let BatchExportJob {
+                index,
+                source_path,
+                output_path,
+                source,
+            } = job;
+            metadata.insert(index, (source_path, output_path));
+            match worker_batch_source(source).await {
+                Ok(source) => worker_jobs.push(WorkerBatchJob { index, source }),
+                Err(error) => {
+                    let (source_path, output_path) = metadata
+                        .remove(&index)
+                        .expect("batch metadata was inserted");
+                    results.push(BatchExportItemResult {
+                        index,
+                        source_path,
+                        output_path,
+                        result: Err(error),
+                    });
+                }
+            }
+        }
+
+        if !worker_jobs.is_empty() {
+            match run_batch_worker(WorkerBatchRequest {
+                jobs: worker_jobs,
+                mode,
+                encode_options: options,
+            })
+            .await
+            {
+                Ok(response) => {
+                    for item in response.results {
+                        let Some((source_path, output_path)) = metadata.remove(&item.index) else {
+                            continue;
+                        };
+                        results.push(BatchExportItemResult {
+                            index: item.index,
+                            source_path,
+                            output_path,
+                            result: item.error.map_or(Ok(item.bytes), Err),
+                        });
+                    }
+                }
+                Err(error) => {
+                    for (index, (source_path, output_path)) in metadata.drain() {
+                        results.push(BatchExportItemResult {
+                            index,
+                            source_path,
+                            output_path,
+                            result: Err(error.clone()),
+                        });
+                    }
+                }
+            }
+        }
+
+        for (index, (source_path, output_path)) in metadata.drain() {
+            results.push(BatchExportItemResult {
+                index,
+                source_path,
+                output_path,
+                result: Err("Batch worker did not return a result".to_string()),
+            });
+        }
+
+        completed += chunk_len;
+        set_batch_progress_status(status, i18n, mode, completed, total);
     }
     results
 }
@@ -336,43 +412,76 @@ fn process_batch_export_job_sync(
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn process_batch_export_job_async(
-    job: BatchExportJob,
+async fn worker_batch_source(
+    source: Result<BatchDocumentSource, String>,
+) -> Result<WorkerBatchSource, String> {
+    match source {
+        Ok(BatchDocumentSource::Tab(tab)) => worker_batch_source_from_tab(*tab),
+        Ok(BatchDocumentSource::LoadedFile(file)) => worker_batch_source_from_file(file).await,
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn worker_batch_source_from_tab(tab: EditorTabState) -> Result<WorkerBatchSource, String> {
+    if !tab.dirty
+        && let Some(document_id) = tab.worker_document_id
+    {
+        return Ok(WorkerBatchSource::DocumentId(document_id));
+    }
+
+    let format = tab.mode.text_format();
+    let bytes = if format.is_some() {
+        tab.text_buffer
+            .as_ref()
+            .map(|buffer| buffer.materialize().into_bytes())
+            .unwrap_or_else(|| tab.editor_text.as_bytes().to_vec())
+    } else {
+        tab.byte_doc
+            .as_ref()
+            .map(|document| document.as_cow().into_owned())
+            .ok_or_else(|| "RTON tab has no byte surface".to_string())?
+    };
+    Ok(WorkerBatchSource::Bytes { bytes, format })
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn export_tab_in_web_worker(
+    tab: EditorTabState,
     mode: BatchExportMode,
     options: EncodeOptions,
-) -> BatchExportItemResult {
-    let result = match resolve_batch_export_document(job.source).await {
-        Ok(doc) => run_cpu_task(move || encode_batch_export_document(&doc, mode, options)).await,
-        Err(error) => Err(error),
+) -> Result<Vec<u8>, String> {
+    let source = worker_batch_source_from_tab(tab)?;
+    let response = run_batch_worker(WorkerBatchRequest {
+        jobs: vec![WorkerBatchJob { index: 0, source }],
+        mode,
+        encode_options: options,
+    })
+    .await?;
+    let item = response
+        .results
+        .into_iter()
+        .find(|item| item.index == 0)
+        .ok_or_else(|| "Worker did not return an export result".to_string())?;
+    item.error.map_or(Ok(item.bytes), Err)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn worker_batch_source_from_file(file: LoadedFileState) -> Result<WorkerBatchSource, String> {
+    let format = match SourceFormat::from_file_name(&file.display_name) {
+        SourceFormat::Json => Some(rton_editor_core::TextFormat::Json),
+        SourceFormat::Yaml => Some(rton_editor_core::TextFormat::Yaml),
+        SourceFormat::Toml => Some(rton_editor_core::TextFormat::Toml),
+        SourceFormat::Rton | SourceFormat::Unknown => None,
     };
-
-    BatchExportItemResult {
-        index: job.index,
-        source_path: job.source_path,
-        output_path: job.output_path,
-        result,
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn resolve_batch_export_document(
-    source: Result<BatchDocumentSource, String>,
-) -> Result<Arc<DecodedDocument>, String> {
-    match source {
-        Ok(BatchDocumentSource::Tab(tab)) => document_for_batch_tab(*tab).await,
-        Ok(BatchDocumentSource::LoadedFile(file)) => {
-            let tab = create_tab_from_loaded_file(0, &file)
-                .await
-                .map_err(OpenTabError::message)?;
-            document_for_batch_tab(tab).await
+    let bytes = match file.source {
+        LoadedFileSource::Bytes(bytes) => bytes.to_vec(),
+        LoadedFileSource::WebFile(file) => crate::file_import::read_web_file_bytes(&file).await?,
+        LoadedFileSource::NativePath(_) => {
+            return Err("Native file paths are unavailable in the web build".to_string());
         }
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn document_for_batch_tab(tab: EditorTabState) -> Result<Arc<DecodedDocument>, String> {
-    run_cpu_task(move || document_for_owned_tab(tab).map_err(|error| error.to_string())).await
+    };
+    Ok(WorkerBatchSource::Bytes { bytes, format })
 }
 
 #[cfg(not(target_arch = "wasm32"))]

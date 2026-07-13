@@ -1,16 +1,15 @@
 use dioxus::prelude::*;
 use rton_editor_core::{ValueSearchMatch, ValueSearchResult};
-use std::sync::Arc;
 
 use crate::domain::{
-    VALUE_SEARCH_DEFAULT_VIEWPORT_HEIGHT, measured_value_search_viewport_height,
+    IdentityArc, VALUE_SEARCH_DEFAULT_VIEWPORT_HEIGHT, measured_value_search_viewport_height,
     value_search_virtual_row_top, value_search_virtual_scroll,
 };
 use crate::i18n::I18n;
 
 #[component]
 pub(crate) fn ValueSearchResults(
-    result: Arc<ValueSearchResult>,
+    result: IdentityArc<ValueSearchResult>,
     i18n: I18n,
     on_select: EventHandler<String>,
     suppress_resize_observer: bool,

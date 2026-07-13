@@ -5,17 +5,19 @@ pub(crate) mod editor_preferences;
 pub(crate) mod editor_tab;
 pub(crate) mod file_paths;
 pub(crate) mod hex_edit;
+pub(crate) mod identity_arc;
 pub(crate) mod rton_inspector;
+pub(crate) mod text_buffer;
 pub(crate) mod text_history;
-pub(crate) mod text_locator;
 pub(crate) mod text_search;
 pub(crate) mod toolbar_layout;
 pub(crate) mod virtual_scroll;
 
 pub(crate) use app_state::{OpenTabError, Status, Tone};
+#[cfg(any(not(target_arch = "wasm32"), test))]
+pub(crate) use batch_export::encode_batch_export_document;
 pub(crate) use batch_export::{
-    BatchExportMode, ZipArchiveBuilder, batch_archive_name, batch_output_path,
-    encode_batch_export_document, unique_zip_path,
+    BatchExportMode, ZipArchiveBuilder, batch_archive_name, batch_output_path, unique_zip_path,
 };
 #[cfg(test)]
 pub(crate) use batch_export::{ZipFileEntry, create_zip_archive};
@@ -29,15 +31,18 @@ pub(crate) use editor_tab::create_tab_from_bytes;
 pub(crate) use editor_tab::document_for_tab;
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) use editor_tab::tab_surface_for_document;
-pub(crate) use editor_tab::{
-    EditorTabState, RtonSurfaceCache, TabTaskState, TextBuffer, TextContentState,
-    TextRangeReplacement, TextSurfaceCache, create_tab_from_byte_document, create_text_tab,
-    create_text_tab_from_surface, default_expanded_paths, document_for_owned_tab,
-    empty_editor_text, empty_tree_rows, text_surface_from_text, value_search_result_for_doc,
-    value_tree_rows_for_doc, value_tree_rows_for_doc_with_expansion,
-};
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use editor_tab::{text_line_offsets, text_surface_from_arc_parts};
+pub(crate) use editor_tab::text_surface_from_arc;
+pub(crate) use editor_tab::{
+    EditorTabState, RtonSurfaceCache, TabTaskState, TextContentState, TextSurfaceCache,
+    create_tab_from_byte_document, create_text_tab, create_text_tab_from_surface,
+    default_expanded_paths, empty_editor_text, empty_tree_rows, text_surface_from_text,
+};
+#[cfg(any(not(target_arch = "wasm32"), test))]
+pub(crate) use editor_tab::{
+    document_for_owned_tab, value_search_result_for_doc, value_tree_rows_for_doc,
+    value_tree_rows_for_doc_with_expansion,
+};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use file_paths::normalize_display_path;
 pub(crate) use file_paths::{
@@ -45,6 +50,8 @@ pub(crate) use file_paths::{
     is_loadable_display_name, leaf_display_name, loadable_file_kind_label,
     parse_file_list_file_key, parse_file_list_tab_key,
 };
+#[cfg(any(not(target_arch = "wasm32"), test))]
+pub(crate) use hex_edit::find_hex_search_result;
 #[cfg(test)]
 pub(crate) use hex_edit::{
     HEX_SEARCH_MATCH_DISPLAY_LIMIT, HexUndoEdit, apply_hex_edit, apply_hex_edits, edited_len,
@@ -53,10 +60,19 @@ pub(crate) use hex_edit::{
 };
 pub(crate) use hex_edit::{
     HexEdit, HexHistory, HexSearchMatch, HexSearchMode, HexSearchResult, edited_len_after_edits,
-    find_containing_match, find_hex_search_result, hex_search_status_text, parse_replace_pattern,
-    parse_search_pattern, prepare_hex_edits, push_hex_past_batch, push_hex_redo_batch,
-    push_hex_undo_batch, relative_search_match, replace_all_byte_edits,
+    find_containing_match, hex_search_status_text, parse_replace_pattern, parse_search_pattern,
+    prepare_hex_edits, push_hex_past_batch, push_hex_redo_batch, push_hex_undo_batch,
+    relative_search_match, replace_all_byte_edits,
 };
+pub(crate) use identity_arc::IdentityArc;
+pub(crate) use rton_editor_core::TextPosition;
+pub(crate) use rton_editor_core::TextSearchMatch;
+#[cfg(test)]
+pub(crate) use rton_editor_core::find_text_search_result;
+#[cfg(test)]
+pub(crate) use rton_editor_core::locate_value_path_in_text;
+#[cfg(test)]
+pub(crate) use rton_editor_core::offset_to_text_position;
 #[cfg(test)]
 pub(crate) use rton_inspector::RtonStringMode;
 pub(crate) use rton_inspector::{
@@ -64,19 +80,17 @@ pub(crate) use rton_inspector::{
     inspect_special_region, locate_rton_value_offset, maybe_collect_string_tables,
     read_rton_varint, rton_tag_info, string_mode_label,
 };
+pub(crate) use text_buffer::{TextBuffer, TextRangeReplacement};
 pub(crate) use text_history::{
     TextHistory, TextHistoryEntry, TextRangeHistoryEntry, can_record_text_undo,
     push_text_past_range, push_text_past_snapshot, push_text_redo_range, push_text_redo_snapshot,
     push_text_undo_range, push_text_undo_snapshot,
 };
 #[cfg(test)]
-pub(crate) use text_locator::offset_to_text_position;
-pub(crate) use text_locator::{TextPosition, locate_value_path_in_text};
-#[cfg(test)]
 pub(crate) use text_search::replace_all_text_matches;
 pub(crate) use text_search::{
-    TextSearchMatch, find_text_search_result, next_text_search_index, previous_text_search_index,
-    replace_all_text_query, replace_text_span, text_search_status_text,
+    next_text_search_index, previous_text_search_index, replace_all_text_query, replace_text_span,
+    text_search_status_text,
 };
 pub(crate) use toolbar_layout::{
     DropMarker, DropPlacement, ToolbarDropTarget, ToolbarGroupId, apply_toolbar_drop_target,

@@ -45,9 +45,23 @@ fn maps_theme_preferences_to_shell_and_editor_themes() {
 }
 
 #[test]
+fn round_trips_editor_mode_preference_codes() {
+    for mode in [
+        EditorMode::RtonHex,
+        EditorMode::Json,
+        EditorMode::Yaml,
+        EditorMode::Toml,
+    ] {
+        assert_eq!(EditorMode::from_code(mode.code()), Some(mode));
+    }
+    assert_eq!(EditorMode::from_code(" YAML\n"), Some(EditorMode::Yaml));
+    assert_eq!(EditorMode::from_code("unknown"), None);
+}
+
+#[test]
 fn normalizes_toolbar_rows_and_appends_missing_groups() {
     let rows = normalize_toolbar_rows(Some(
-        r#"[["prefs","file","file","unknown"],["format"],["edit"]]"#,
+        r#"[["prefs","file","file","unknown"],["about","format"],["edit"]]"#,
     ));
 
     assert_eq!(
@@ -58,7 +72,6 @@ fn normalizes_toolbar_rows_and_appends_missing_groups() {
                 ToolbarGroupId::Edit,
                 ToolbarGroupId::TextExport,
                 ToolbarGroupId::RtonExport,
-                ToolbarGroupId::About,
             ],
         ]
     );
@@ -86,11 +99,7 @@ fn moves_toolbar_groups_across_rows() {
                 ToolbarGroupId::File,
                 ToolbarGroupId::Edit,
             ],
-            vec![
-                ToolbarGroupId::TextExport,
-                ToolbarGroupId::RtonExport,
-                ToolbarGroupId::About,
-            ],
+            vec![ToolbarGroupId::TextExport, ToolbarGroupId::RtonExport,],
         ]
     );
 
@@ -102,7 +111,6 @@ fn moves_toolbar_groups_across_rows() {
             vec![
                 ToolbarGroupId::TextExport,
                 ToolbarGroupId::RtonExport,
-                ToolbarGroupId::About,
                 ToolbarGroupId::File,
             ],
         ]

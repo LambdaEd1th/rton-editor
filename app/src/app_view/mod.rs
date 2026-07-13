@@ -1,6 +1,8 @@
 use crate::i18n::{self, I18n};
 use dioxus::prelude::*;
 use rton_editor_core::{BinaryEncoding, EncodeOptions, TextFormat};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::app_actions::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -11,8 +13,8 @@ use crate::components::{
     PanelResizeDrag, PanelResizeHandle, PanelSide, TabStrip, file_path_matches_scope,
 };
 use crate::domain::{
-    BatchExportMode, ByteDocument, EditorMode, HexEdit, Status, TextBuffer, TextRangeReplacement,
-    TextSearchMatch, Tone, default_expanded_paths, empty_tree_rows,
+    BatchExportMode, ByteDocument, EditorMode, HexEdit, IdentityArc, Status, TextBuffer,
+    TextRangeReplacement, TextSearchMatch, Tone, default_expanded_paths, empty_tree_rows,
 };
 use crate::file_import::*;
 
@@ -23,12 +25,14 @@ mod handlers;
 mod index_panel;
 mod signals;
 mod snapshot;
+mod text_selection;
 mod toolbar_view;
 mod workspace_drop;
+mod workspace_frame;
 use editor_stage::{EditorStage, EditorStageTab};
+use effects::{RtonOutputSize, RtonOutputSourceKey, use_rton_output_size_effect};
 #[cfg(target_arch = "wasm32")]
-use effects::use_web_i18n_loader;
-use effects::{RtonOutputSize, use_rton_output_size_effect};
+use effects::{use_web_file_drop_guard, use_web_i18n_loader, use_web_visual_viewport_effect};
 use file_panel::FilePanel;
 use handlers::{
     commit_panel_resize_width, finish_workspace_drag_state, start_tab_drag_if_needed,
@@ -38,73 +42,111 @@ use handlers::{
 use index_panel::IndexPanel;
 use signals::{AppSignals, use_app_signals};
 use snapshot::{
-    editor_search_snapshot, empty_editor_search_snapshot, file_panel_snapshot, tab_headers_for_tabs,
+    FilePanelCacheKey, FilePanelSnapshot, editor_search_result_from_core, editor_search_snapshot,
+    empty_editor_search_result_snapshot, empty_editor_search_snapshot, file_panel_snapshot,
+    loaded_files_fingerprint, tab_headers_for_tabs,
 };
 use toolbar_view::ToolbarView;
-use workspace_drop::handle_workspace_file_drop;
-const APP_CSS: &str = include_str!("../../assets/style.css");
+use workspace_drop::{handle_workspace_file_drop, workspace_drag_has_files};
+use workspace_frame::WorkspaceFrame;
 const _: Asset = asset!("/assets/i18n", AssetOptions::folder());
 const _: Asset = asset!("/assets/worker", AssetOptions::folder());
+const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+const TOKENS_CSS: Asset = asset!("/assets/tokens.css");
+const APP_CSS: Asset = asset!("/assets/style.css");
+const WORKBENCH_CSS: Asset = asset!("/assets/workbench.css");
 
 #[component]
 pub(crate) fn App() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     let _loaded_i18n_count = use_hook(load_i18n_sources);
     let initial_locale_snapshot = initial_locale();
-
-    let AppSignals {
-        tabs,
-        loaded_files,
-        active_tab_id,
-        next_tab_id,
-        next_loaded_file_id,
-        compact_output,
-        encrypt_output,
-        mut dragging_files,
-        theme_preference,
-        locale,
-        i18n_revision,
-        #[cfg(target_arch = "wasm32")]
-        i18n_loaded,
-        line_wrapping,
-        mut editor_search_panel_visible,
-        mut editor_search_text,
-        mut editor_replace_text,
-        mut editor_search_case_sensitive,
-        mut editor_search_match_index,
-        editor_search_focus_token,
-        mut file_search_query,
-        file_selection,
-        next_jump_id,
-        text_jump_target,
-        hex_jump_target,
-        left_panel_width,
-        right_panel_width,
-        mut panel_resize_drag,
-        dragged_tab_id,
-        tab_drop_marker,
-        toolbar_rows,
-        dragged_toolbar_group_id,
-        toolbar_drop_marker,
-        mut status,
-    } = use_app_signals(initial_locale_snapshot);
+    let signals = use_app_signals(initial_locale_snapshot, initial_inspector_drawer_open());
+    use_context_provider(|| signals);
 
     #[cfg(target_arch = "wasm32")]
     use_web_i18n_loader(
-        locale,
-        status,
-        i18n_loaded,
-        i18n_revision,
+        signals.preferences.locale,
+        signals.status,
+        signals.preferences.i18n_loaded,
+        signals.preferences.i18n_revision,
         initial_locale_snapshot,
     );
+    #[cfg(target_arch = "wasm32")]
+    use_web_visual_viewport_effect();
+    #[cfg(target_arch = "wasm32")]
+    use_web_file_drop_guard();
 
     #[cfg(target_arch = "wasm32")]
-    if !*i18n_loaded.read() {
+    if !*signals.preferences.i18n_loaded.read() {
         return rsx! {
-            style { {APP_CSS} }
+            document::Stylesheet { href: TAILWIND_CSS }
+            document::Stylesheet { href: TOKENS_CSS }
+            document::Stylesheet { href: APP_CSS }
+            document::Stylesheet { href: WORKBENCH_CSS }
             div { class: "rton-app rton-loading-screen", "Loading localization..." }
         };
     }
+
+    rsx! {
+        Workbench {}
+    }
+}
+
+#[component]
+fn Workbench() -> Element {
+    let signals = use_context::<AppSignals>();
+    let AppSignals {
+        workspace:
+            signals::WorkspaceSignals {
+                tabs,
+                loaded_files,
+                active_tab_id,
+                next_tab_id,
+                next_loaded_file_id,
+                mut file_search_query,
+                file_selection,
+            },
+        preferences:
+            signals::PreferenceSignals {
+                compact_output,
+                encrypt_output,
+                mut preferred_editor_mode,
+                theme_preference,
+                locale,
+                i18n_revision,
+                #[cfg(target_arch = "wasm32")]
+                    i18n_loaded: _,
+                line_wrapping,
+            },
+        editor:
+            signals::EditorSessionSignals {
+                mut editor_search_panel_visible,
+                mut editor_search_text,
+                mut editor_replace_text,
+                mut editor_search_case_sensitive,
+                mut editor_search_match_index,
+                editor_search_focus_token,
+                next_jump_id,
+                text_jump_target,
+                hex_jump_target,
+            },
+        layout:
+            signals::LayoutSignals {
+                dragging_files,
+                file_drawer_open,
+                inspector_drawer_open,
+                left_panel_width,
+                right_panel_width,
+                mut panel_resize_drag,
+                dragged_tab_id,
+                tab_drop_marker,
+                toolbar_rows,
+                dragged_toolbar_group_id,
+                toolbar_drop_marker,
+            },
+        mut status,
+    } = signals;
 
     let active_id_snapshot = *active_tab_id.read();
     let rton_output_size = use_signal(|| None::<RtonOutputSize>);
@@ -112,9 +154,10 @@ pub(crate) fn App() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     let last_window_size_save = use_signal(|| None::<(u32, u32)>);
     let (
-        active_tab_snapshot,
+        active_output_source_key,
         active_stage_tab_snapshot,
-        active_doc_snapshot,
+        active_stats_snapshot,
+        has_parsed_document_snapshot,
         active_byte_doc_snapshot,
         active_file_name_snapshot,
         active_mode_snapshot,
@@ -139,18 +182,29 @@ pub(crate) fn App() -> Element {
         let value_search_result = if active_search.trim().is_empty() {
             None
         } else {
-            active_tab_snapshot.and_then(|tab| tab.search_result.clone())
+            active_tab_snapshot
+                .and_then(|tab| tab.search_result.clone())
+                .map(IdentityArc::from)
         };
         (
-            active_tab_snapshot.cloned(),
+            active_tab_snapshot.map(|tab| RtonOutputSourceKey {
+                tab_id: tab.id,
+                content_revision: tab.content_revision,
+                mode: tab.mode,
+            }),
             active_tab_snapshot.map(|tab| EditorStageTab {
                 id: tab.id,
                 mode: tab.mode,
-                text_buffer: tab.text_buffer.clone(),
+                worker_document_id: (!tab.dirty && tab.worker_surface_mode == Some(tab.mode))
+                    .then_some(tab.worker_document_id)
+                    .flatten(),
+                text_buffer: tab.text_buffer.clone().map(IdentityArc::from),
                 text_state: tab.text_state.clone(),
                 task_state: tab.task_state.clone(),
             }),
-            active_tab_snapshot.and_then(|tab| tab.doc.clone()),
+            active_tab_snapshot.and_then(|tab| tab.stats.clone()),
+            active_tab_snapshot
+                .is_some_and(|tab| tab.doc.is_some() || tab.worker_document_id.is_some()),
             active_tab_snapshot.and_then(|tab| tab.byte_doc.clone()),
             active_tab_snapshot.map(|tab| tab.file_name.clone()),
             active_tab_snapshot.map(|tab| tab.mode),
@@ -160,30 +214,32 @@ pub(crate) fn App() -> Element {
                 .map(|tab| tab.selected_path.clone())
                 .unwrap_or_else(|| "$".to_string()),
             active_tab_snapshot
-                .map(|tab| tab.tree_rows.clone())
-                .unwrap_or_else(empty_tree_rows),
+                .map(|tab| IdentityArc::from(tab.tree_rows.clone()))
+                .unwrap_or_else(|| IdentityArc::from(empty_tree_rows())),
             active_tab_snapshot
-                .map(|tab| tab.expanded_paths.clone())
-                .unwrap_or_else(default_expanded_paths),
+                .map(|tab| IdentityArc::from(tab.expanded_paths.clone()))
+                .unwrap_or_else(|| IdentityArc::from(default_expanded_paths())),
             active_tab_snapshot.is_some_and(tab_can_undo),
             active_tab_snapshot.is_some_and(tab_can_redo),
             active_tab_snapshot
                 .filter(|tab| tab.mode.text_format().is_some())
-                .and_then(|tab| tab.text_buffer.clone()),
+                .and_then(|tab| tab.text_buffer.clone())
+                .map(IdentityArc::from),
             tab_headers_for_tabs(&tabs_snapshot),
         )
     };
     let compact_snapshot = *compact_output.read();
     let encrypt_snapshot = *encrypt_output.read();
     use_rton_output_size_effect(
-        active_tab_snapshot.clone(),
+        active_output_source_key,
+        tabs,
         compact_snapshot,
         encrypt_snapshot,
         rton_output_size,
         rton_output_size_generation,
     );
     let rton_output_size_snapshot = *rton_output_size.read();
-    let dragging_snapshot = *dragging_files.read();
+    let preferred_editor_mode_snapshot = *preferred_editor_mode.read();
     let theme_preference_snapshot = *theme_preference.read();
     let locale_snapshot = *locale.read();
     let _i18n_revision_snapshot = *i18n_revision.read();
@@ -198,11 +254,56 @@ pub(crate) fn App() -> Element {
     let editor_search_focus_token_snapshot = *editor_search_focus_token.read();
     let should_search_editor_text =
         editor_search_panel_visible_snapshot && !editor_search_text_snapshot.is_empty();
+    let editor_search_result = {
+        let mut result = use_signal(empty_editor_search_result_snapshot);
+        let mut generation = use_signal(|| 0_u64);
+        let worker_document_id = active_stage_tab_snapshot
+            .as_ref()
+            .and_then(|tab| tab.worker_document_id);
+        use_effect(use_reactive(
+            &(
+                active_text_buffer_snapshot.clone(),
+                worker_document_id,
+                should_search_editor_text,
+                editor_search_text_snapshot.clone(),
+                editor_search_case_sensitive_snapshot,
+            ),
+            move |(text_buffer, worker_document_id, should_search, query, case_sensitive)| {
+                let next_generation = (*generation.peek()).saturating_add(1);
+                generation.set(next_generation);
+                result.set(empty_editor_search_result_snapshot());
+                if !should_search {
+                    return;
+                }
+                let Some(text_buffer) = text_buffer else {
+                    return;
+                };
+                spawn(async move {
+                    crate::platform::sleep_ms(120).await;
+                    if *generation.peek() != next_generation {
+                        return;
+                    }
+                    let response = crate::application::SearchService::search_text(
+                        text_buffer.arc(),
+                        worker_document_id,
+                        query,
+                        case_sensitive,
+                    )
+                    .await;
+                    if *generation.peek() == next_generation
+                        && let Ok(response) = response
+                    {
+                        result.set(editor_search_result_from_core(response));
+                    }
+                });
+            },
+        ));
+        result
+    };
     let editor_search = if should_search_editor_text {
         editor_search_snapshot(
-            active_text_buffer_snapshot.as_deref(),
+            &editor_search_result.read(),
             &editor_search_text_snapshot,
-            editor_search_case_sensitive_snapshot,
             editor_search_match_index_snapshot,
             i18n,
         )
@@ -226,6 +327,8 @@ pub(crate) fn App() -> Element {
     let active_text_jump_target = text_search_jump.or(*text_jump_target.read());
     let file_search_snapshot = file_search_query.read().clone();
     let file_selection_snapshot = file_selection.read().clone();
+    let file_panel_cache =
+        use_hook(|| Rc::new(RefCell::new(None::<(FilePanelCacheKey, FilePanelSnapshot)>)));
     let file_panel_memo = use_memo(move || {
         let loaded_files_snapshot = loaded_files.read();
         let tabs_snapshot = tabs.read();
@@ -234,21 +337,37 @@ pub(crate) fn App() -> Element {
         let file_search = file_search_query.read().clone();
         let selection = file_selection.read().clone();
         let locale_snapshot = *locale.read();
-        let _i18n_revision_snapshot = *i18n_revision.read();
-        file_panel_snapshot(
+        let i18n_revision_snapshot = *i18n_revision.read();
+        let key = FilePanelCacheKey {
+            loaded_files_fingerprint: loaded_files_fingerprint(&loaded_files_snapshot),
+            tab_headers: tab_headers.clone(),
+            active_tab_id: active_id,
+            search_query: file_search.clone(),
+            selection: selection.clone(),
+            locale_code: locale_snapshot.code(),
+            i18n_revision: i18n_revision_snapshot,
+        };
+        if let Some((cached_key, snapshot)) = file_panel_cache.borrow().as_ref()
+            && cached_key == &key
+        {
+            return snapshot.clone();
+        }
+        let snapshot = file_panel_snapshot(
             &loaded_files_snapshot,
             &tab_headers,
             active_id,
             &file_search,
             &selection,
             I18n::new(locale_snapshot),
-        )
+        );
+        *file_panel_cache.borrow_mut() = Some((key, snapshot.clone()));
+        snapshot
     });
     let file_panel = file_panel_memo.read().clone();
     let left_panel_width_snapshot = *left_panel_width.read();
     let right_panel_width_snapshot = *right_panel_width.read();
     let panel_resize_drag_snapshot = *panel_resize_drag.read();
-    let panel_resizing_snapshot = panel_resize_drag_snapshot.is_some();
+    let suppress_panel_resize_observers = panel_resize_drag_snapshot.is_some();
     let dragged_tab_id_snapshot = *dragged_tab_id.read();
     let tab_drop_marker_snapshot = *tab_drop_marker.read();
     let toolbar_rows_snapshot = toolbar_rows.read().clone();
@@ -269,7 +388,7 @@ pub(crate) fn App() -> Element {
     );
     let output_value_label = file_output_summary(FileOutputSummaryInput {
         has_active_file: active_stage_tab_snapshot.is_some(),
-        active_tab_id: active_tab_snapshot.as_ref().map(|tab| tab.id),
+        active_tab_id: active_output_source_key.map(|source| source.tab_id),
         mode: active_mode_snapshot,
         byte_doc: active_byte_doc_snapshot.as_ref(),
         text_byte_count: active_text_byte_count_snapshot,
@@ -288,7 +407,15 @@ pub(crate) fn App() -> Element {
     };
 
     let load_sample = move |_| {
-        load_sample_tab(next_tab_id, tabs, active_tab_id, status, i18n);
+        load_sample_tab(
+            next_tab_id,
+            tabs,
+            active_tab_id,
+            *preferred_editor_mode.read(),
+            rton_display_encode_options(*compact_output.read()),
+            status,
+            i18n,
+        );
     };
 
     let activate_tab = move |id: usize| {
@@ -304,6 +431,7 @@ pub(crate) fn App() -> Element {
             active_tab_id,
             compact_output,
             encrypt_output,
+            *preferred_editor_mode.read(),
             status,
             i18n,
         );
@@ -345,6 +473,8 @@ pub(crate) fn App() -> Element {
     };
 
     let switch_mode = move |next_mode: EditorMode| {
+        let _ = crate::platform::save_editor_mode_preference(next_mode);
+        preferred_editor_mode.set(Some(next_mode));
         switch_active_mode(
             next_mode,
             rton_display_encode_options(*compact_output.read()),
@@ -386,7 +516,7 @@ pub(crate) fn App() -> Element {
         EventHandler::new(move |mode: BatchExportMode| {
             batch_export_selected_file_items(
                 mode,
-                file_list_items.clone(),
+                file_list_items.arc(),
                 file_selection,
                 tabs,
                 loaded_files,
@@ -549,36 +679,58 @@ pub(crate) fn App() -> Element {
     };
 
     let open_native_files = move |_| {
-        open_native_files_dialog(
+        if open_native_files_dialog(
             loaded_files,
             next_loaded_file_id,
             file_selection,
             status,
             i18n,
-        );
+        ) {
+            reveal_file_drawer_after_commit(file_drawer_open, inspector_drawer_open);
+        }
     };
 
     let open_native_folder = move |_| {
-        open_native_folder_dialog(
+        if open_native_folder_dialog(
             loaded_files,
             next_loaded_file_id,
             file_selection,
+            status,
+            i18n,
+        ) {
+            reveal_file_drawer_after_commit(file_drawer_open, inspector_drawer_open);
+        }
+    };
+
+    let select_value_path = move |path: String| {
+        navigate_to_value_path(
+            path,
+            tabs,
+            active_tab_id,
+            next_jump_id,
+            text_jump_target,
+            hex_jump_target,
             status,
             i18n,
         );
     };
 
     rsx! {
-        document::Stylesheet {
-            href: asset!("/assets/tailwind.css")
-        }
-        style { {APP_CSS} }
+        document::Stylesheet { href: TAILWIND_CSS }
+        document::Stylesheet { href: TOKENS_CSS }
+        document::Stylesheet { href: APP_CSS }
+        document::Stylesheet { href: WORKBENCH_CSS }
         main {
             class: theme_preference_snapshot.shell_class(),
             onresize: move |event| {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    if let Ok(size) = event.get_content_box_size() {
+                if let Ok(size) = event.get_content_box_size() {
+                    reconcile_drawers_for_viewport(
+                        size.width,
+                        file_drawer_open,
+                        inspector_drawer_open,
+                    );
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
                         save_desktop_viewport_size(
                             size.width,
                             size.height,
@@ -586,18 +738,51 @@ pub(crate) fn App() -> Element {
                         );
                     }
                 }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let _ = event;
-                }
             },
             onmouseup: handle_workspace_mouse_up,
+            ondragover: move |event| {
+                if workspace_drag_has_files(&event) {
+                    event.prevent_default();
+                    let mut dragging_files = dragging_files;
+                    dragging_files.set(true);
+                }
+            },
+            ondragleave: move |_| {
+                let mut dragging_files = dragging_files;
+                dragging_files.set(false);
+            },
+            ondrop: move |event| {
+                if !workspace_drag_has_files(&event) {
+                    return;
+                }
+                // Chrome requires this during event dispatch; doing it in the async reader is too late.
+                event.prevent_default();
+                spawn(async move {
+                    let imported = handle_workspace_file_drop(
+                        event,
+                        dragging_files,
+                        loaded_files,
+                        next_loaded_file_id,
+                        file_selection,
+                        status,
+                        i18n,
+                    )
+                    .await;
+                    if imported {
+                        reveal_file_drawer_after_commit(
+                            file_drawer_open,
+                            inspector_drawer_open,
+                        );
+                    }
+                });
+            },
             ToolbarView {
                 i18n,
                 toolbar_rows_snapshot: toolbar_rows_snapshot.clone(),
                 dragged_toolbar_group_id_snapshot,
                 toolbar_drop_marker_snapshot,
                 active_mode_snapshot,
+                preferred_mode_snapshot: preferred_editor_mode_snapshot,
                 active_file_label: active_file_label.clone(),
                 compact_snapshot,
                 encrypt_snapshot,
@@ -608,6 +793,8 @@ pub(crate) fn App() -> Element {
                 editor_search_panel_visible_snapshot,
                 can_undo_snapshot,
                 can_redo_snapshot,
+                file_drawer_open,
+                inspector_drawer_open,
                 loaded_files,
                 next_loaded_file_id,
                 file_selection,
@@ -622,50 +809,25 @@ pub(crate) fn App() -> Element {
                 start_toolbar_group_drag: EventHandler::new(start_toolbar_group_drag),
                 open_native_files: EventHandler::new(move |_| open_native_files(())),
                 open_native_folder: EventHandler::new(move |_| open_native_folder(())),
+                on_files_staged: EventHandler::new(move |_| {
+                    reveal_file_drawer_after_commit(file_drawer_open, inspector_drawer_open)
+                }),
                 load_sample: EventHandler::new(move |_| load_sample(())),
                 undo_edit,
                 redo_edit,
+                on_switch_mode: EventHandler::new(switch_mode),
                 on_compact_change: EventHandler::new(handle_compact_change),
                 export_text: EventHandler::new(export_text),
                 parse_current: EventHandler::new(move |_| parse_current(())),
                 export_rton: EventHandler::new(move |_| export_rton(()))
             }
 
-            div {
-                class: if dragging_snapshot { "rton-workspace-shell dragging-files" } else { "rton-workspace-shell" },
-                style: "{workspace_style}",
-                ondragover: move |event| {
-                    event.prevent_default();
-                    dragging_files.set(true);
-                },
-                ondragleave: move |_| {
-                    dragging_files.set(false);
-                },
-                ondrop: move |event| async move {
-                    handle_workspace_file_drop(
-                        event,
-                        dragging_files,
-                        loaded_files,
-                        next_loaded_file_id,
-                        file_selection,
-                        status,
-                        i18n,
-                    )
-                    .await;
-                },
-                TabStrip {
-                    tabs: tab_headers.clone(),
-                    active_tab_id: active_id_snapshot,
-                    dragged_tab_id: dragged_tab_id_snapshot,
-                    drop_marker: tab_drop_marker_snapshot,
-                    i18n,
-                    on_activate: activate_tab,
-                    on_close: close_tab,
-                    on_drag_start: start_tab_drag,
-                    on_drop_marker: update_tab_drop_marker,
-                    on_drag_end: finish_tab_drag
-                }
-
+            WorkspaceFrame {
+                i18n,
+                dragging_files,
+                file_drawer_open,
+                inspector_drawer_open,
+                workspace_style,
                 section { class: "rton-main-content",
                     FilePanel {
                         i18n,
@@ -687,7 +849,7 @@ pub(crate) fn App() -> Element {
                         on_remove_path: EventHandler::new(remove_file_list_path),
                         on_toggle_selected: EventHandler::new(toggle_selected_file),
                         on_toggle_path: EventHandler::new(toggle_selected_path),
-                        suppress_resize_observer: panel_resizing_snapshot
+                        suppress_resize_observer: suppress_panel_resize_observers
                     }
 
                     PanelResizeHandle {
@@ -698,40 +860,55 @@ pub(crate) fn App() -> Element {
                         on_start: handle_panel_resize_start
                     }
 
-                    EditorStage {
-                        i18n,
-                        active_tab: active_stage_tab_snapshot.clone(),
-                        active_byte_doc: active_byte_doc_snapshot.clone(),
-                        hex_jump_target: *hex_jump_target.read(),
-                        text_jump_target: active_text_jump_target,
-                        line_wrapping: line_wrapping_snapshot,
-                        editor_search_panel_visible: editor_search_panel_visible_snapshot,
-                        editor_search_text: editor_search_text_snapshot.clone(),
-                        editor_replace_text: editor_replace_text_snapshot.clone(),
-                        editor_search_case_sensitive: editor_search_case_sensitive_snapshot,
-                        editor_search_controls_disabled: editor_search.controls_disabled,
-                        editor_search_status_text: editor_search.status_text.clone(),
-                        on_hex_change: EventHandler::new(update_hex_edit),
-                        on_virtual_text_range_replace: EventHandler::new(update_virtual_text_range),
-                        on_undo: undo_edit,
-                        on_redo: redo_edit,
-                        on_search_visible_change: EventHandler::new(move |visible| editor_search_panel_visible.set(visible)),
-                        on_find_input: EventHandler::new(move |value: String| {
-                            editor_search_text.set(value);
-                            editor_search_match_index.set(0);
-                        }),
-                        on_case_sensitive_change: EventHandler::new(move |checked: bool| {
-                            editor_search_case_sensitive.set(checked);
-                            editor_search_match_index.set(0);
-                        }),
-                        on_replace_input: EventHandler::new(move |value: String| editor_replace_text.set(value)),
-                        on_previous_match: EventHandler::new(go_to_previous_editor_match),
-                        on_next_match: EventHandler::new(go_to_next_editor_match),
-                        on_replace_current: EventHandler::new(replace_current_editor_match),
-                        on_replace_all: EventHandler::new(replace_all_editor_matches),
-                        on_find_key: EventHandler::new(handle_editor_search_key),
-                        on_replace_key: EventHandler::new(handle_editor_replace_key),
-                        suppress_resize_observer: panel_resizing_snapshot
+                    section { class: "rton-center-panel",
+                        TabStrip {
+                            tabs: tab_headers.clone(),
+                            active_tab_id: active_id_snapshot,
+                            dragged_tab_id: dragged_tab_id_snapshot,
+                            drop_marker: tab_drop_marker_snapshot,
+                            i18n,
+                            on_activate: activate_tab,
+                            on_close: close_tab,
+                            on_drag_start: start_tab_drag,
+                            on_drop_marker: update_tab_drop_marker,
+                            on_drag_end: finish_tab_drag
+                        }
+
+                        EditorStage {
+                            i18n,
+                            active_tab: active_stage_tab_snapshot.clone(),
+                            active_byte_doc: active_byte_doc_snapshot.clone(),
+                            hex_jump_target: *hex_jump_target.read(),
+                            text_jump_target: active_text_jump_target,
+                            line_wrapping: line_wrapping_snapshot,
+                            editor_search_panel_visible: editor_search_panel_visible_snapshot,
+                            editor_search_text: editor_search_text_snapshot.clone(),
+                            editor_replace_text: editor_replace_text_snapshot.clone(),
+                            editor_search_case_sensitive: editor_search_case_sensitive_snapshot,
+                            editor_search_controls_disabled: editor_search.controls_disabled,
+                            editor_search_status_text: editor_search.status_text.clone(),
+                            on_hex_change: EventHandler::new(update_hex_edit),
+                            on_virtual_text_range_replace: EventHandler::new(update_virtual_text_range),
+                            on_undo: undo_edit,
+                            on_redo: redo_edit,
+                            on_search_visible_change: EventHandler::new(move |visible| editor_search_panel_visible.set(visible)),
+                            on_find_input: EventHandler::new(move |value: String| {
+                                editor_search_text.set(value);
+                                editor_search_match_index.set(0);
+                            }),
+                            on_case_sensitive_change: EventHandler::new(move |checked: bool| {
+                                editor_search_case_sensitive.set(checked);
+                                editor_search_match_index.set(0);
+                            }),
+                            on_replace_input: EventHandler::new(move |value: String| editor_replace_text.set(value)),
+                            on_previous_match: EventHandler::new(go_to_previous_editor_match),
+                            on_next_match: EventHandler::new(go_to_next_editor_match),
+                            on_replace_current: EventHandler::new(replace_current_editor_match),
+                            on_replace_all: EventHandler::new(replace_all_editor_matches),
+                            on_find_key: EventHandler::new(handle_editor_search_key),
+                            on_replace_key: EventHandler::new(handle_editor_replace_key),
+                            suppress_resize_observer: suppress_panel_resize_observers
+                        }
                     }
 
                     PanelResizeHandle {
@@ -744,11 +921,12 @@ pub(crate) fn App() -> Element {
 
                     IndexPanel {
                         i18n,
+                        active_file_id: active_output_source_key.map(|source| source.tab_id),
                         active_file_label: active_file_label.clone(),
                         input_value: input_value_label,
                         output_value: output_value_label.clone(),
-                        active_mode: active_mode_snapshot,
-                        active_doc: active_doc_snapshot.clone(),
+                        active_stats: active_stats_snapshot.clone(),
+                        has_parsed_document: has_parsed_document_snapshot,
                         active_search: active_search.clone(),
                         selected_path: selected_path_snapshot.clone(),
                         tree_rows: tree_rows.clone(),
@@ -756,18 +934,8 @@ pub(crate) fn App() -> Element {
                         value_search_result,
                         on_search_change: EventHandler::new(move |query: String| update_active_search(query, tabs, active_tab_id)),
                         on_toggle_path: EventHandler::new(move |path: String| toggle_active_tree_path(path, tabs, active_tab_id)),
-                        on_switch_mode: EventHandler::new(switch_mode),
-                        on_select_path: EventHandler::new(move |path: String| navigate_to_value_path(
-                            path,
-                            tabs,
-                            active_tab_id,
-                            next_jump_id,
-                            text_jump_target,
-                            hex_jump_target,
-                            status,
-                            i18n,
-                        )),
-                        suppress_resize_observer: panel_resizing_snapshot
+                        on_select_path: EventHandler::new(select_value_path),
+                        suppress_resize_observer: suppress_panel_resize_observers
                     }
                 }
             }
@@ -779,6 +947,157 @@ pub(crate) fn App() -> Element {
                 status: status_snapshot
             }
         }
+    }
+}
+
+fn reveal_file_drawer_after_commit(
+    file_drawer_open: Signal<bool>,
+    inspector_drawer_open: Signal<bool>,
+) {
+    if *file_drawer_open.peek() {
+        set_file_drawer_visibility(true, file_drawer_open, inspector_drawer_open);
+        return;
+    }
+    spawn(async move {
+        crate::platform::sleep_ms(34).await;
+        if !*file_drawer_open.peek() {
+            set_file_drawer_visibility(true, file_drawer_open, inspector_drawer_open);
+        }
+    });
+}
+
+const OVERLAY_DRAWER_MAX_WIDTH: f64 = 900.0;
+
+#[derive(Clone, Copy)]
+enum DrawerSide {
+    File,
+    Inspector,
+}
+
+fn is_overlay_drawer_width(width: f64) -> bool {
+    width.is_finite() && width <= OVERLAY_DRAWER_MAX_WIDTH
+}
+
+fn drawer_state_after_change(
+    side: DrawerSide,
+    open: bool,
+    overlay_layout: bool,
+    file_open: bool,
+    inspector_open: bool,
+) -> (bool, bool) {
+    match side {
+        DrawerSide::File => (
+            open,
+            if open && overlay_layout {
+                false
+            } else {
+                inspector_open
+            },
+        ),
+        DrawerSide::Inspector => (
+            if open && overlay_layout {
+                false
+            } else {
+                file_open
+            },
+            open,
+        ),
+    }
+}
+
+fn current_overlay_drawer_layout() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|window| window.inner_width().ok())
+            .and_then(|width| width.as_f64())
+            .is_some_and(is_overlay_drawer_width)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
+}
+
+fn set_drawer_visibility(
+    side: DrawerSide,
+    open: bool,
+    overlay_layout: bool,
+    mut file_drawer_open: Signal<bool>,
+    mut inspector_drawer_open: Signal<bool>,
+) {
+    let (next_file_open, next_inspector_open) = drawer_state_after_change(
+        side,
+        open,
+        overlay_layout,
+        *file_drawer_open.peek(),
+        *inspector_drawer_open.peek(),
+    );
+    if next_file_open != *file_drawer_open.peek() {
+        file_drawer_open.set(next_file_open);
+    }
+    if next_inspector_open != *inspector_drawer_open.peek() {
+        inspector_drawer_open.set(next_inspector_open);
+    }
+}
+
+pub(super) fn set_file_drawer_visibility(
+    open: bool,
+    file_drawer_open: Signal<bool>,
+    inspector_drawer_open: Signal<bool>,
+) {
+    set_drawer_visibility(
+        DrawerSide::File,
+        open,
+        current_overlay_drawer_layout(),
+        file_drawer_open,
+        inspector_drawer_open,
+    );
+}
+
+pub(super) fn set_inspector_drawer_visibility(
+    open: bool,
+    file_drawer_open: Signal<bool>,
+    inspector_drawer_open: Signal<bool>,
+) {
+    set_drawer_visibility(
+        DrawerSide::Inspector,
+        open,
+        current_overlay_drawer_layout(),
+        file_drawer_open,
+        inspector_drawer_open,
+    );
+}
+
+fn reconcile_drawers_for_viewport(
+    width: f64,
+    file_drawer_open: Signal<bool>,
+    inspector_drawer_open: Signal<bool>,
+) {
+    if is_overlay_drawer_width(width) && *file_drawer_open.peek() && *inspector_drawer_open.peek() {
+        set_drawer_visibility(
+            DrawerSide::File,
+            true,
+            true,
+            file_drawer_open,
+            inspector_drawer_open,
+        );
+    }
+}
+
+fn initial_inspector_drawer_open() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|window| window.inner_width().ok())
+            .and_then(|width| width.as_f64())
+            .is_some_and(|width| width > OVERLAY_DRAWER_MAX_WIDTH)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        true
     }
 }
 
@@ -948,14 +1267,47 @@ fn offset_to_text_buffer_position(
     buffer: &TextBuffer,
     offset: usize,
 ) -> crate::domain::TextPosition {
-    let bounded_offset = offset.min(buffer.text.len());
-    let line_index = buffer
-        .line_offsets
-        .partition_point(|line_offset| *line_offset <= bounded_offset)
-        .saturating_sub(1);
-    let line_start = buffer.line_offsets.get(line_index).copied().unwrap_or(0);
+    let bounded_offset = offset.min(buffer.byte_count());
+    let line_index = buffer.byte_to_line(bounded_offset);
+    let line_start = buffer.line_start_byte(line_index).unwrap_or(0);
     crate::domain::TextPosition {
         line: line_index + 1,
         column: bounded_offset.saturating_sub(line_start),
+    }
+}
+
+#[cfg(test)]
+mod drawer_layout_tests {
+    use super::{DrawerSide, drawer_state_after_change, is_overlay_drawer_width};
+
+    #[test]
+    fn overlay_drawers_are_mutually_exclusive() {
+        assert_eq!(
+            drawer_state_after_change(DrawerSide::File, true, true, false, true),
+            (true, false)
+        );
+        assert_eq!(
+            drawer_state_after_change(DrawerSide::Inspector, true, true, true, false),
+            (false, true)
+        );
+    }
+
+    #[test]
+    fn desktop_drawers_remain_independent() {
+        assert_eq!(
+            drawer_state_after_change(DrawerSide::File, true, false, false, true),
+            (true, true)
+        );
+        assert_eq!(
+            drawer_state_after_change(DrawerSide::Inspector, true, false, true, false),
+            (true, true)
+        );
+    }
+
+    #[test]
+    fn overlay_breakpoint_matches_css() {
+        assert!(is_overlay_drawer_width(900.0));
+        assert!(!is_overlay_drawer_width(901.0));
+        assert!(!is_overlay_drawer_width(f64::NAN));
     }
 }

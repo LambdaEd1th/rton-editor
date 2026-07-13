@@ -4,6 +4,7 @@ mod app_i18n;
 mod app_layout;
 mod app_sample;
 mod app_view;
+mod application;
 mod batch_export_runner;
 mod components;
 mod domain;

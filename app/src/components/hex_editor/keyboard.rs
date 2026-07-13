@@ -6,7 +6,7 @@ use super::logic::{
     HexCommitTargets, HexSelectionTarget, commit_hex_clear_target, commit_hex_write_target,
     hex_selection_target, is_hex_key, key_to_latin1_byte, set_hex_focus,
 };
-use super::state::{ByteSelection, HEX_BYTES_PER_ROW, HexPane, PendingHexEdit};
+use super::state::{ByteSelection, HexPane, PendingHexEdit};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn handle_hex_key(
@@ -14,6 +14,7 @@ pub(super) fn handle_hex_key(
     bytes: &ByteDocument,
     bytes_len: usize,
     safe_selected_offset: usize,
+    bytes_per_row: usize,
     normalized_selection: Option<ByteSelection>,
     mut insert_mode: Signal<bool>,
     active_pane: Signal<HexPane>,
@@ -29,6 +30,7 @@ pub(super) fn handle_hex_key(
     if bytes_len == 0 {
         return;
     }
+    let bytes_per_row = bytes_per_row.max(1);
     let commit_targets = HexCommitTargets {
         on_change,
         pending_hex_edit,
@@ -93,7 +95,7 @@ pub(super) fn handle_hex_key(
         "ArrowUp" => {
             event.prevent_default();
             set_hex_focus(
-                safe_selected_offset as isize - HEX_BYTES_PER_ROW as isize,
+                safe_selected_offset as isize - bytes_per_row as isize,
                 shift,
                 bytes_len,
                 selection_range,
@@ -104,7 +106,7 @@ pub(super) fn handle_hex_key(
         "ArrowDown" => {
             event.prevent_default();
             set_hex_focus(
-                safe_selected_offset as isize + HEX_BYTES_PER_ROW as isize,
+                safe_selected_offset as isize + bytes_per_row as isize,
                 shift,
                 bytes_len,
                 selection_range,
@@ -115,7 +117,7 @@ pub(super) fn handle_hex_key(
         "Home" => {
             event.prevent_default();
             set_hex_focus(
-                (safe_selected_offset / HEX_BYTES_PER_ROW * HEX_BYTES_PER_ROW) as isize,
+                (safe_selected_offset / bytes_per_row * bytes_per_row) as isize,
                 shift,
                 bytes_len,
                 selection_range,
@@ -126,8 +128,8 @@ pub(super) fn handle_hex_key(
         "End" => {
             event.prevent_default();
             set_hex_focus(
-                ((safe_selected_offset / HEX_BYTES_PER_ROW * HEX_BYTES_PER_ROW) + HEX_BYTES_PER_ROW
-                    - 1) as isize,
+                ((safe_selected_offset / bytes_per_row * bytes_per_row) + bytes_per_row - 1)
+                    as isize,
                 shift,
                 bytes_len,
                 selection_range,

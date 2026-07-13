@@ -1,31 +1,46 @@
 use std::sync::Arc;
 
 use crate::components::{FileListItem, FileSelection, TabHeader, file_item_matches_search};
-use crate::domain::{
-    EditorTabState, TextBuffer, TextSearchMatch, find_text_search_result, text_search_status_text,
-};
+use crate::domain::{EditorTabState, IdentityArc, TextSearchMatch, text_search_status_text};
 use crate::file_import::{LoadedFileState, build_file_list_items};
 use crate::i18n::I18n;
 
 pub(super) struct EditorSearchSnapshot {
-    pub(super) matches: Vec<TextSearchMatch>,
+    pub(super) matches: Arc<[TextSearchMatch]>,
     pub(super) match_count: usize,
     pub(super) status_text: String,
     pub(super) controls_disabled: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct EditorSearchResultSnapshot {
+    pub(super) matches: Arc<[TextSearchMatch]>,
+    pub(super) capped: bool,
+}
+
+pub(super) fn editor_search_result_from_core(
+    result: rton_editor_core::TextSearchResult,
+) -> EditorSearchResultSnapshot {
+    EditorSearchResultSnapshot {
+        matches: Arc::from(result.matches),
+        capped: result.capped,
+    }
+}
+
+pub(super) fn empty_editor_search_result_snapshot() -> EditorSearchResultSnapshot {
+    EditorSearchResultSnapshot {
+        matches: Arc::from([]),
+        capped: false,
+    }
+}
+
 pub(super) fn editor_search_snapshot(
-    text_buffer: Option<&TextBuffer>,
+    result: &EditorSearchResultSnapshot,
     query: &str,
-    case_sensitive: bool,
     match_index: usize,
     i18n: I18n,
 ) -> EditorSearchSnapshot {
-    let Some(text_buffer) = text_buffer else {
-        return empty_editor_search_snapshot(query, i18n);
-    };
-    let result = find_text_search_result(text_buffer.text.as_ref(), query, case_sensitive);
-    let matches = result.matches;
+    let matches = result.matches.clone();
     let match_count = matches.len();
     let current_index = if match_count == 0 {
         None
@@ -45,7 +60,7 @@ pub(super) fn editor_search_snapshot(
 
 pub(super) fn empty_editor_search_snapshot(query: &str, i18n: I18n) -> EditorSearchSnapshot {
     EditorSearchSnapshot {
-        matches: Vec::new(),
+        matches: Arc::from([]),
         match_count: 0,
         status_text: text_search_status_text(query, 0, None, false, i18n),
         controls_disabled: true,
@@ -54,12 +69,35 @@ pub(super) fn empty_editor_search_snapshot(query: &str, i18n: I18n) -> EditorSea
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct FilePanelSnapshot {
-    pub(super) all_items: Arc<Vec<FileListItem>>,
-    pub(super) filtered_items: Arc<Vec<FileListItem>>,
+    pub(super) all_items: IdentityArc<Vec<FileListItem>>,
+    pub(super) filtered_items: IdentityArc<Vec<FileListItem>>,
     pub(super) empty_message: String,
     pub(super) selected_count: usize,
     pub(super) selected_visible_count: usize,
     pub(super) subtitle: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct FilePanelCacheKey {
+    pub(super) loaded_files_fingerprint: u64,
+    pub(super) tab_headers: Vec<TabHeader>,
+    pub(super) active_tab_id: usize,
+    pub(super) search_query: String,
+    pub(super) selection: FileSelection,
+    pub(super) locale_code: &'static str,
+    pub(super) i18n_revision: u64,
+}
+
+pub(super) fn loaded_files_fingerprint(files: &[LoadedFileState]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    files.len().hash(&mut hasher);
+    for file in files {
+        file.id.hash(&mut hasher);
+        file.display_name.hash(&mut hasher);
+        file.size.hash(&mut hasher);
+        file.tab_id.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 pub(super) fn tab_headers_for_tabs(tabs: &[EditorTabState]) -> Vec<TabHeader> {
@@ -82,16 +120,23 @@ pub(super) fn file_panel_snapshot(
     selection: &FileSelection,
     i18n: I18n,
 ) -> FilePanelSnapshot {
-    let all_items = build_file_list_items(loaded_files, tab_headers, active_tab_id, i18n);
+    let all_items = IdentityArc::new(build_file_list_items(
+        loaded_files,
+        tab_headers,
+        active_tab_id,
+        i18n,
+    ));
     let search_active = !search_query.trim().is_empty();
     let filtered_items = if !search_active {
         all_items.clone()
     } else {
-        all_items
-            .iter()
-            .filter(|item| file_item_matches_search(item, search_query))
-            .cloned()
-            .collect::<Vec<_>>()
+        IdentityArc::new(
+            all_items
+                .iter()
+                .filter(|item| file_item_matches_search(item, search_query))
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
     };
     let empty_message = if !search_active {
         i18n.t("common-no-file")
@@ -123,11 +168,13 @@ pub(super) fn file_panel_snapshot(
     };
 
     FilePanelSnapshot {
-        all_items: Arc::new(all_items),
-        filtered_items: Arc::new(filtered_items),
+        all_items,
+        filtered_items,
         empty_message,
         selected_count,
         selected_visible_count,
         subtitle,
     }
 }
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};

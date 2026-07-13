@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
+use crate::domain::text_surface_from_arc;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::domain::value_tree_rows_for_doc;
 use crate::domain::{
     ByteDocument, EditorTabState, OpenTabError, create_tab_from_byte_document,
@@ -15,8 +17,6 @@ use crate::domain::{
 };
 #[cfg(target_arch = "wasm32")]
 use crate::domain::{TextBuffer, TextContentState};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::domain::{text_line_offsets, text_surface_from_arc_parts};
 use crate::platform;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::platform::run_cpu_task;
@@ -265,20 +265,10 @@ fn create_text_tab_from_text_parallel(
 ) -> EditorTabState {
     let text = Arc::<str>::from(text);
     let (surface, doc) = std::thread::scope(|scope| {
-        let offsets_text = text.clone();
-        let line_offsets = scope.spawn(move || text_line_offsets(offsets_text.as_ref()));
         let parse_text_source = text.clone();
         let doc = scope.spawn(move || parse_text(parse_text_source.as_ref(), format).ok());
-        (
-            text_surface_from_arc_parts(
-                text,
-                line_offsets
-                    .join()
-                    .expect("text line offsets task panicked"),
-                format,
-            ),
-            doc.join().expect("text parse task panicked"),
-        )
+        let surface = text_surface_from_arc(text, format);
+        (surface, doc.join().unwrap_or(None))
     });
     text_tab_with_optional_document(id, display_name, surface, format, doc)
 }
@@ -295,6 +285,7 @@ fn text_tab_with_optional_document(
     if let Some(doc) = doc {
         let doc = Arc::new(doc);
         tab.tree_rows = value_tree_rows_for_doc(&doc);
+        tab.stats = Some(doc.stats.clone());
         tab.doc = Some(doc);
     }
     tab
@@ -309,8 +300,10 @@ fn worker_open_text_response_to_tab(
 ) -> Result<EditorTabState, OpenTabError> {
     let surface = worker_surface_to_tab_surface(response.surface, expected_format)?;
     let mut tab = create_text_tab_from_surface(id, display_name, surface, expected_format);
-    if let Some(doc) = response.doc {
-        tab.doc = Some(Arc::new(doc));
+    tab.worker_document_id = response.worker_document_id;
+    tab.worker_surface_mode = response.worker_document_id.map(|_| tab.mode);
+    if let Some(stats) = response.stats {
+        tab.stats = Some(stats);
         tab.tree_rows = Arc::new(response.tree_rows);
         tab.search_result = response.search_result.map(Arc::new);
         tab.search_query = response.search_query;
@@ -325,7 +318,6 @@ fn worker_surface_to_tab_surface(
 ) -> Result<crate::domain::editor_tab::TabSurface, OpenTabError> {
     let WorkerSurface::Text {
         text,
-        line_offsets,
         byte_count,
         line_count,
         format,
@@ -341,10 +333,10 @@ fn worker_surface_to_tab_surface(
         ));
     }
 
-    let text_buffer = Arc::new(TextBuffer::from_parts(text, line_offsets));
+    let text_buffer = Arc::new(TextBuffer::new(text));
     Ok(crate::domain::editor_tab::TabSurface {
         byte_doc: None,
-        editor_text: text_buffer.text.clone(),
+        editor_text: crate::domain::empty_editor_text(),
         text_buffer: Some(text_buffer),
         text_state: TextContentState::Text {
             byte_count,

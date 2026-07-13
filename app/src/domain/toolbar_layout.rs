@@ -28,7 +28,6 @@ pub(crate) enum ToolbarGroupId {
     TextExport,
     RtonExport,
     Preferences,
-    About,
 }
 
 impl ToolbarGroupId {
@@ -39,7 +38,6 @@ impl ToolbarGroupId {
             ToolbarGroupId::TextExport => "textExport",
             ToolbarGroupId::RtonExport => "rtonExport",
             ToolbarGroupId::Preferences => "prefs",
-            ToolbarGroupId::About => "about",
         }
     }
 
@@ -50,7 +48,6 @@ impl ToolbarGroupId {
             "textExport" => Some(ToolbarGroupId::TextExport),
             "rtonExport" => Some(ToolbarGroupId::RtonExport),
             "prefs" => Some(ToolbarGroupId::Preferences),
-            "about" => Some(ToolbarGroupId::About),
             _ => None,
         }
     }
@@ -62,7 +59,6 @@ impl ToolbarGroupId {
             ToolbarGroupId::TextExport => "toolbar-group-text-export",
             ToolbarGroupId::RtonExport => "toolbar-group-rton-export",
             ToolbarGroupId::Preferences => "toolbar-group-preferences",
-            ToolbarGroupId::About => "toolbar-group-about",
         }
     }
 }
@@ -85,19 +81,17 @@ pub(crate) fn default_toolbar_rows() -> Vec<Vec<ToolbarGroupId>> {
             ToolbarGroupId::TextExport,
             ToolbarGroupId::RtonExport,
             ToolbarGroupId::Preferences,
-            ToolbarGroupId::About,
         ],
     ]
 }
 
-fn all_toolbar_group_ids() -> [ToolbarGroupId; 6] {
+fn all_toolbar_group_ids() -> [ToolbarGroupId; 5] {
     [
         ToolbarGroupId::File,
         ToolbarGroupId::Edit,
         ToolbarGroupId::TextExport,
         ToolbarGroupId::RtonExport,
         ToolbarGroupId::Preferences,
-        ToolbarGroupId::About,
     ]
 }
 

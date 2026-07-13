@@ -18,6 +18,8 @@ pub enum CoreError {
     NonFiniteJson(&'static str),
     #[error("Invalid value path: {0}")]
     InvalidPath(String),
+    #[error("Worker request is invalid: {0}")]
+    InvalidWorkerRequest(String),
     #[error("Value path not found: {0}")]
     PathNotFound(String),
     #[error("{0} values cannot be edited as scalars")]

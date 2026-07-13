@@ -1,11 +1,10 @@
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::ld_icons::{LdActivity, LdFileArchive, LdFolderOpen};
-use rton_editor_core::DecodedDocument;
-use std::sync::Arc;
+use rton_editor_core::ValueStats;
 
 use crate::app_constants::LOADABLE_FILE_HINT;
-use crate::components::{MetaItem, PanelHeader, StatsGrid, button_class, lucide_icon};
-use crate::domain::{EditorMode, Status};
+use crate::components::{MetaItem, PanelHeader, StatsGrid, lucide_icon};
+use crate::domain::Status;
 use crate::i18n::I18n;
 
 #[component]
@@ -28,27 +27,14 @@ pub(crate) fn FileSummaryPanel(
     active_file_label: String,
     input_value: String,
     output_value: String,
-    active_mode: Option<EditorMode>,
-    doc: Option<Arc<DecodedDocument>>,
-    on_switch_mode: EventHandler<EditorMode>,
+    stats: Option<ValueStats>,
 ) -> Element {
     rsx! {
         div { class: "rton-inspector-summary",
             PanelHeader {
                 icon: lucide_icon(LdFileArchive),
                 title: i18n.t("panel-file-properties"),
-                subtitle: i18n.t("panel-current-file"),
-                div { class: "batch-export-grid",
-                    for mode in [EditorMode::RtonHex, EditorMode::Json, EditorMode::Yaml, EditorMode::Toml] {
-                        button {
-                            class: if active_mode == Some(mode) { button_class("primary") } else { button_class("secondary") },
-                            disabled: active_mode.is_none(),
-                            aria_pressed: active_mode == Some(mode),
-                            onclick: move |_| on_switch_mode.call(mode),
-                            "{mode.label()}"
-                        }
-                    }
-                }
+                subtitle: i18n.t("panel-current-file")
             }
             section { class: "file-summary-meta-section",
                 dl { class: "meta-list",
@@ -66,13 +52,13 @@ pub(crate) fn FileSummaryPanel(
                     }
                 }
             }
-            if let Some(doc) = doc.as_ref() {
+            if let Some(stats) = stats {
                 section { class: "file-summary-stats-section",
                     div { class: "stats-title",
                         span { class: "panel-header-icon muted", {lucide_icon(LdActivity)} }
                         h2 { {i18n.t("panel-stats")} }
                     }
-                    StatsGrid { stats: doc.stats.clone(), i18n }
+                    StatsGrid { stats, i18n }
                 }
             }
         }

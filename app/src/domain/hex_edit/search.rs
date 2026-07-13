@@ -2,6 +2,7 @@ use super::edit::HexEdit;
 use crate::domain::byte_document::ByteRead;
 use crate::i18n::I18n;
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) const HEX_SEARCH_MATCH_DISPLAY_LIMIT: usize = 5000;
 #[cfg(not(target_arch = "wasm32"))]
 const PARALLEL_HEX_SEARCH_MIN_BYTES: usize = 512 * 1024;
@@ -133,6 +134,7 @@ pub(crate) fn find_hex_search_matches<B: ByteRead + Sync + ?Sized>(
     find_hex_search_result(bytes, pattern, ascii_insensitive).matches
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn find_hex_search_result<B: ByteRead + Sync + ?Sized>(
     bytes: &B,
     pattern: &[u8],
@@ -153,6 +155,7 @@ pub(crate) fn find_hex_search_result<B: ByteRead + Sync + ?Sized>(
     find_hex_search_result_sequential(bytes, pattern, ascii_insensitive)
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 fn find_hex_search_result_sequential<B: ByteRead + ?Sized>(
     bytes: &B,
     pattern: &[u8],

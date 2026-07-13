@@ -29,6 +29,36 @@ fn file_tab_class(active: bool, dragging: bool, drop_placement: Option<DropPlace
     class_name
 }
 
+fn scroll_active_tab_into_view(active_tab_id: usize) {
+    document::eval(&format!(
+        r#"
+        (() => {{
+            const container = document.querySelector('.rton-file-tabs');
+            const tab = document.querySelector('.rton-file-tab[data-rton-tab-id="{active_tab_id}"]');
+            if (!container || !tab) return;
+
+            const tabLeft = tab.offsetLeft;
+            const tabRight = tabLeft + tab.offsetWidth;
+            const visibleLeft = container.scrollLeft;
+            const visibleRight = visibleLeft + container.clientWidth;
+            const padding = 8;
+
+            if (tabLeft < visibleLeft + padding) {{
+                container.scrollTo({{
+                    left: Math.max(0, tabLeft - padding),
+                    behavior: 'smooth',
+                }});
+            }} else if (tabRight > visibleRight - padding) {{
+                container.scrollTo({{
+                    left: tabRight - container.clientWidth + padding,
+                    behavior: 'smooth',
+                }});
+            }}
+        }})();
+        "#
+    ));
+}
+
 #[component]
 pub(crate) fn TabStrip(
     tabs: Vec<TabHeader>,
@@ -43,6 +73,9 @@ pub(crate) fn TabStrip(
     on_drag_end: EventHandler<()>,
 ) -> Element {
     let tab_count = tabs.len();
+    use_effect(use_reactive(&active_tab_id, move |active_tab_id| {
+        scroll_active_tab_into_view(active_tab_id);
+    }));
 
     rsx! {
         nav { class: "rton-tab-strip",
@@ -52,6 +85,7 @@ pub(crate) fn TabStrip(
                 aria_label: i18n.t("tabs-open-files"),
                 for tab in tabs {
                     div {
+                        "data-rton-tab-id": "{tab.id}",
                         class: file_tab_class(
                             tab.id == active_tab_id,
                             dragged_tab_id == Some(tab.id),

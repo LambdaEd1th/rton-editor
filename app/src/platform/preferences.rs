@@ -3,7 +3,7 @@ use crate::app_constants::{
     DESKTOP_WINDOW_DEFAULT_HEIGHT, DESKTOP_WINDOW_DEFAULT_WIDTH, DESKTOP_WINDOW_MIN_HEIGHT,
     DESKTOP_WINDOW_MIN_WIDTH,
 };
-use crate::domain::ThemePreference;
+use crate::domain::{EditorMode, ThemePreference};
 
 #[cfg(target_arch = "wasm32")]
 const LOCALE_PREFERENCE_KEY: &str = "rton-editor-locale";
@@ -13,6 +13,8 @@ const THEME_PREFERENCE_KEY: &str = "rton-editor-theme";
 const TOOLBAR_LAYOUT_KEY: &str = "rton-editor-toolbar-layout";
 #[cfg(target_arch = "wasm32")]
 const LINE_WRAPPING_KEY: &str = "rton-editor-line-wrapping";
+#[cfg(target_arch = "wasm32")]
+const EDITOR_MODE_KEY: &str = "rton-editor-editor-mode";
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn app_config_dir() -> Option<std::path::PathBuf> {
@@ -146,6 +148,44 @@ pub fn save_line_wrapping_preference(enabled: bool) -> Result<(), String> {
     std::fs::write(path, bool_preference_value(enabled)).map_err(|error| error.to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_editor_mode_preference() -> Option<EditorMode> {
+    let path = editor_mode_preference_path()?;
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|value| EditorMode::from_code(&value))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn read_editor_mode_preference() -> Option<EditorMode> {
+    web_sys::window()
+        .and_then(|window| window.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(EDITOR_MODE_KEY).ok().flatten())
+        .and_then(|value| EditorMode::from_code(&value))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn save_editor_mode_preference(mode: EditorMode) -> Result<(), String> {
+    let path = editor_mode_preference_path()
+        .ok_or_else(|| "could not resolve editor mode preference path".to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(path, mode.code()).map_err(|error| error.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn save_editor_mode_preference(mode: EditorMode) -> Result<(), String> {
+    let window = web_sys::window().ok_or_else(|| "window is unavailable".to_string())?;
+    let storage = window
+        .local_storage()
+        .map_err(|error| format!("{error:?}"))?
+        .ok_or_else(|| "localStorage is unavailable".to_string())?;
+    storage
+        .set_item(EDITOR_MODE_KEY, mode.code())
+        .map_err(|error| format!("{error:?}"))
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn save_line_wrapping_preference(enabled: bool) -> Result<(), String> {
     let window = web_sys::window().ok_or_else(|| "window is unavailable".to_string())?;
@@ -258,6 +298,11 @@ fn toolbar_layout_preference_path() -> Option<std::path::PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 fn line_wrapping_preference_path() -> Option<std::path::PathBuf> {
     Some(app_config_dir()?.join("line-wrapping"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn editor_mode_preference_path() -> Option<std::path::PathBuf> {
+    Some(app_config_dir()?.join("editor-mode"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

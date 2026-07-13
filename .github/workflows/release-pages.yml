@@ -154,6 +154,13 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Setup nightly WASM threads toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-07-01
+          components: rust-src
+          targets: wasm32-unknown-unknown
+
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
@@ -169,6 +176,12 @@ jobs:
             cargo install dioxus-cli --version "${DX_VERSION}" --locked
           fi
 
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+
+      - name: Build Web Workers
+        run: ./scripts/build-web-workers.sh
+
       - name: Build WASM site
         run: |
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
@@ -179,6 +192,7 @@ jobs:
             --debug-symbols=false \
             --base-path "/${REPO_NAME}/"
           touch "${WEB_DIST}/.nojekyll"
+          cp deploy/_headers "${WEB_DIST}/_headers"
 
       - name: Package web artifact
         run: |

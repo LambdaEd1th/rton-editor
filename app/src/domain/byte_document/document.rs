@@ -2,7 +2,9 @@ use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
 
-use super::{ByteDocumentReader, ByteSource};
+#[cfg(any(not(target_arch = "wasm32"), test))]
+use super::ByteDocumentReader;
+use super::ByteSource;
 use crate::domain::HexEdit;
 
 #[derive(Debug, Clone)]
@@ -65,6 +67,7 @@ impl ByteDocument {
         self.source.as_cow()
     }
 
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn reader(&self) -> ByteDocumentReader {
         ByteDocumentReader {
             document: self.clone(),

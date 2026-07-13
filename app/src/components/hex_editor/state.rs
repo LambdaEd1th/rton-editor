@@ -1,4 +1,6 @@
 pub(super) const HEX_BYTES_PER_ROW: usize = 16;
+pub(super) const HEX_COMPACT_BYTES_PER_ROW: usize = 8;
+pub(super) const HEX_COMPACT_LAYOUT_MAX_WIDTH: f64 = 560.0;
 pub(super) const HEX_INSPECTOR_DEFAULT_WIDTH: i32 = 310;
 pub(super) const HEX_INSPECTOR_MIN_WIDTH: i32 = 220;
 pub(super) const HEX_INSPECTOR_MAX_WIDTH: i32 = 620;
@@ -51,6 +53,7 @@ pub(super) struct HexEditorSignals {
     pub(super) pointer_selecting: Signal<bool>,
     pub(super) scroll_top: Signal<f64>,
     pub(super) viewport_height: Signal<usize>,
+    pub(super) bytes_per_row: Signal<usize>,
     pub(super) inspector_width: Signal<i32>,
     pub(super) inspector_drag: Signal<Option<HexInspectorResizeDrag>>,
     pub(super) search_mode: Signal<HexSearchMode>,
@@ -81,6 +84,7 @@ pub(super) fn use_hex_editor_signals() -> HexEditorSignals {
         pointer_selecting: use_signal(|| false),
         scroll_top: use_signal(|| 0_f64),
         viewport_height: use_signal(|| HEX_DEFAULT_VIEWPORT_HEIGHT),
+        bytes_per_row: use_signal(|| HEX_BYTES_PER_ROW),
         inspector_width: use_signal(|| HEX_INSPECTOR_DEFAULT_WIDTH),
         inspector_drag: use_signal(|| None::<HexInspectorResizeDrag>),
         search_mode: use_signal(|| HexSearchMode::Hex),

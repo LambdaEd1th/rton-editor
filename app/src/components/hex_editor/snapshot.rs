@@ -6,7 +6,7 @@ use crate::domain::{
 use crate::i18n::I18n;
 
 use super::logic::{hex_offset_width, normalize_selection, to_offset_hex};
-use super::state::{ByteSelection, HEX_BYTES_PER_ROW};
+use super::state::ByteSelection;
 
 pub(super) struct HexEditorSnapshot {
     pub(super) bytes_len: usize,
@@ -41,6 +41,7 @@ pub(super) fn hex_editor_snapshot(
     insert_mode: bool,
     scroll_top: f64,
     viewport_height: usize,
+    bytes_per_row: usize,
     inspector_width: i32,
     search_panel_visible: bool,
     search_mode: HexSearchMode,
@@ -51,6 +52,7 @@ pub(super) fn hex_editor_snapshot(
     i18n: I18n,
 ) -> HexEditorSnapshot {
     let bytes_len = bytes.len();
+    let bytes_per_row = bytes_per_row.max(1);
     let safe_selected_offset = if bytes_len == 0 {
         0
     } else {
@@ -58,7 +60,7 @@ pub(super) fn hex_editor_snapshot(
     };
     let selected_byte = bytes.byte_at(safe_selected_offset).unwrap_or_default();
     let offset_width = hex_offset_width(bytes_len);
-    let row_count = bytes_len.div_ceil(HEX_BYTES_PER_ROW);
+    let row_count = bytes_len.div_ceil(bytes_per_row);
     let virtual_scroll = hex_virtual_scroll(row_count, scroll_top, viewport_height);
     let visible_rows = (virtual_scroll.start_row..virtual_scroll.end_row)
         .map(|row_index| {
@@ -98,7 +100,7 @@ pub(super) fn hex_editor_snapshot(
     let search_controls_disabled = !search_pattern.valid || search_matches.is_empty();
     let replace_controls_disabled = search_controls_disabled || !replace_pattern.valid;
     let style = format!(
-        "--rton-hex-columns: {HEX_BYTES_PER_ROW}; --rton-hex-offset-width: {offset_width}ch; --rton-hex-ascii-width: {HEX_BYTES_PER_ROW}ch; --rton-hex-inspector-width: {inspector_width}px;"
+        "--rton-hex-columns: {bytes_per_row}; --rton-hex-offset-width: {offset_width}ch; --rton-hex-ascii-width: {bytes_per_row}ch; --rton-hex-inspector-width: {inspector_width}px;"
     );
     let mode_label = if insert_mode {
         i18n.t("hex-insert")

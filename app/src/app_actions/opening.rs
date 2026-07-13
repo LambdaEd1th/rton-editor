@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 
-use rton_editor_core::{BinaryEncoding, TextFormat};
+use rton_editor_core::{BinaryEncoding, EncodeOptions, TextFormat};
 
 use crate::app_sample::SAMPLE_JSON;
 use crate::components::FileSelection;
-use crate::domain::{EditorTabState, OpenTabError, Status, Tone, create_text_tab};
+use crate::domain::{EditorMode, EditorTabState, OpenTabError, Status, Tone, create_text_tab};
 use crate::file_import::{
     LoadedFileState, create_tab_from_loaded_file, loaded_file_drafts_from_native,
     stage_loaded_file_drafts,
@@ -12,12 +12,14 @@ use crate::file_import::{
 use crate::i18n::I18n;
 use crate::platform;
 
-use super::document::parse_tab_by_id;
+use super::document::{parse_tab_by_id, switch_active_mode};
 
 pub(crate) fn load_sample_tab(
     mut next_tab_id: Signal<usize>,
     mut tabs: Signal<Vec<EditorTabState>>,
     mut active_tab_id: Signal<usize>,
+    preferred_mode: Option<EditorMode>,
+    encode_options: EncodeOptions,
     mut status: Signal<Status>,
     i18n: I18n,
 ) {
@@ -37,7 +39,16 @@ pub(crate) fn load_sample_tab(
                 i18n.t_args("status-sample-opened", &[("name", name)]),
                 Tone::Ok,
             ));
-            parse_tab_by_id(id, tabs, status, i18n);
+            apply_preferred_mode_or_parse(
+                id,
+                EditorMode::Json,
+                preferred_mode,
+                encode_options,
+                tabs,
+                active_tab_id,
+                status,
+                i18n,
+            );
         }
         Err(error) => status.set(Status::new(error.to_string(), Tone::Error)),
     }
@@ -65,6 +76,7 @@ pub(crate) fn open_loaded_file_by_id(
     mut active_tab_id: Signal<usize>,
     compact_output: Signal<bool>,
     encrypt_output: Signal<bool>,
+    preferred_mode: Option<EditorMode>,
     mut status: Signal<Status>,
     i18n: I18n,
 ) {
@@ -94,6 +106,7 @@ pub(crate) fn open_loaded_file_by_id(
         let name = entry.display_name.clone();
         match create_tab_from_loaded_file(id, &entry).await {
             Ok(tab) => {
+                let source_mode = tab.mode;
                 let source_options = tab.source_encode_options;
                 tabs.write().push(tab);
                 crate::file_import::set_loaded_file_tab_id(loaded_files, file_id, Some(id));
@@ -103,7 +116,19 @@ pub(crate) fn open_loaded_file_by_id(
                     i18n.t_args("status-opened-file", &[("name", name)]),
                     Tone::Ok,
                 ));
-                parse_tab_by_id(id, tabs, status, i18n);
+                apply_preferred_mode_or_parse(
+                    id,
+                    source_mode,
+                    preferred_mode,
+                    EncodeOptions {
+                        encoding: source_options.encoding,
+                        encrypted: false,
+                    },
+                    tabs,
+                    active_tab_id,
+                    status,
+                    i18n,
+                );
             }
             Err(OpenTabError::Read(error)) => status.set(Status::new(
                 i18n.t_args(
@@ -121,6 +146,33 @@ pub(crate) fn open_loaded_file_by_id(
             )),
         }
     });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_preferred_mode_or_parse(
+    tab_id: usize,
+    source_mode: EditorMode,
+    preferred_mode: Option<EditorMode>,
+    encode_options: EncodeOptions,
+    tabs: Signal<Vec<EditorTabState>>,
+    active_tab_id: Signal<usize>,
+    status: Signal<Status>,
+    i18n: I18n,
+) {
+    if let Some(preferred_mode) = preferred_mode
+        && preferred_mode != source_mode
+    {
+        switch_active_mode(
+            preferred_mode,
+            encode_options,
+            tabs,
+            active_tab_id,
+            status,
+            i18n,
+        );
+    } else {
+        parse_tab_by_id(tab_id, tabs, status, i18n);
+    }
 }
 
 fn sync_output_encoding_from_tab(
@@ -146,7 +198,7 @@ pub(crate) fn open_native_files_dialog(
     file_selection: Signal<FileSelection>,
     mut status: Signal<Status>,
     i18n: I18n,
-) {
+) -> bool {
     match platform::open_files() {
         Ok(Some(files)) => stage_native_open_files(
             files,
@@ -156,8 +208,11 @@ pub(crate) fn open_native_files_dialog(
             status,
             i18n,
         ),
-        Ok(None) => {}
-        Err(error) => status.set(Status::new(error, Tone::Error)),
+        Ok(None) => false,
+        Err(error) => {
+            status.set(Status::new(error, Tone::Error));
+            false
+        }
     }
 }
 
@@ -167,7 +222,7 @@ pub(crate) fn open_native_folder_dialog(
     file_selection: Signal<FileSelection>,
     mut status: Signal<Status>,
     i18n: I18n,
-) {
+) -> bool {
     match platform::open_folder() {
         Ok(Some(files)) => stage_native_open_files(
             files,
@@ -177,8 +232,11 @@ pub(crate) fn open_native_folder_dialog(
             status,
             i18n,
         ),
-        Ok(None) => {}
-        Err(error) => status.set(Status::new(error, Tone::Error)),
+        Ok(None) => false,
+        Err(error) => {
+            status.set(Status::new(error, Tone::Error));
+            false
+        }
     }
 }
 
@@ -189,10 +247,10 @@ fn stage_native_open_files(
     file_selection: Signal<FileSelection>,
     mut status: Signal<Status>,
     i18n: I18n,
-) {
+) -> bool {
     if files.is_empty() {
         status.set(Status::new(i18n.t("status-no-loadable-files"), Tone::Warn));
-        return;
+        return false;
     }
 
     let drafts = loaded_file_drafts_from_native(files);
@@ -202,4 +260,5 @@ fn stage_native_open_files(
         i18n.t_args("status-indexed-files", &[("count", indexed.to_string())]),
         Tone::Ok,
     ));
+    indexed > 0
 }

@@ -61,7 +61,20 @@ pub(crate) fn remove_tab_by_id(
     mut tabs: Signal<Vec<EditorTabState>>,
     mut active_tab_id: Signal<usize>,
 ) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    let worker_document_id = tabs
+        .read()
+        .iter()
+        .find(|tab| tab.id == id)
+        .and_then(|tab| tab.worker_document_id);
     let removed = remove_tab_by_id_from_state(&mut tabs.write(), *active_tab_id.read(), id)?;
+
+    #[cfg(target_arch = "wasm32")]
+    if let Some(document_id) = worker_document_id {
+        spawn(async move {
+            let _ = crate::platform::release_worker_document(document_id).await;
+        });
+    }
 
     if let Some(next_active) = removed.next_active_id {
         active_tab_id.set(next_active);

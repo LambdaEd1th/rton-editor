@@ -27,29 +27,49 @@ pub(super) struct RtonOutputSize {
     pub(super) byte_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RtonOutputSourceKey {
+    pub(super) tab_id: usize,
+    pub(super) content_revision: u64,
+    pub(super) mode: EditorMode,
+}
+
 pub(super) fn use_rton_output_size_effect(
-    active_tab: Option<EditorTabState>,
+    source_key: Option<RtonOutputSourceKey>,
+    tabs: Signal<Vec<EditorTabState>>,
     compact: bool,
     encrypted: bool,
     mut output_size: Signal<Option<RtonOutputSize>>,
     mut output_size_generation: Signal<u64>,
 ) {
     use_effect(use_reactive(
-        &(active_tab, compact, encrypted),
-        move |(active_tab, compact, encrypted)| {
+        &(source_key, compact, encrypted),
+        move |(source_key, compact, encrypted)| {
             let generation = output_size_generation.peek().saturating_add(1);
             output_size_generation.set(generation);
 
-            let Some(tab) = active_tab else {
+            let Some(source_key) = source_key else {
                 output_size.set(None);
                 return;
             };
-            if tab.mode != EditorMode::RtonHex || !encrypted {
+            if source_key.mode != EditorMode::RtonHex || !encrypted {
                 output_size.set(None);
                 return;
             }
 
-            let tab_id = tab.id;
+            let tab_id = source_key.tab_id;
+            let tab = tabs
+                .peek()
+                .iter()
+                .find(|tab| {
+                    tab.id == source_key.tab_id
+                        && tab.content_revision == source_key.content_revision
+                })
+                .cloned();
+            let Some(tab) = tab else {
+                output_size.set(None);
+                return;
+            };
             output_size.set(None);
             spawn(async move {
                 let encode_options = EncodeOptions {
@@ -96,11 +116,28 @@ async fn rton_output_size_for_tab(
     tab: EditorTabState,
     encode_options: EncodeOptions,
 ) -> Result<usize, String> {
-    let response = run_rton_size_worker(WorkerRtonSizeRequest {
-        source: worker_document_source(&tab)?,
+    let document_id = (!tab.dirty).then_some(tab.worker_document_id).flatten();
+    let request = WorkerRtonSizeRequest {
+        document_id,
+        source: if document_id.is_some() {
+            None
+        } else {
+            Some(worker_document_source(&tab)?)
+        },
         encode_options,
-    })
-    .await?;
+    };
+    let response = match run_rton_size_worker(request).await {
+        Ok(response) => response,
+        Err(_) if document_id.is_some() => {
+            run_rton_size_worker(WorkerRtonSizeRequest {
+                document_id: None,
+                source: Some(worker_document_source(&tab)?),
+                encode_options,
+            })
+            .await?
+        }
+        Err(error) => return Err(error),
+    };
     Ok(response.byte_len)
 }
 
@@ -125,7 +162,7 @@ fn worker_document_source(tab: &EditorTabState) -> Result<WorkerDocumentSource, 
             let text = tab
                 .text_buffer
                 .as_ref()
-                .map(|buffer| buffer.text.to_string())
+                .map(|buffer| buffer.materialize())
                 .unwrap_or_else(|| tab.editor_text.to_string());
             Ok(WorkerDocumentSource::Text { text, format })
         }
@@ -156,5 +193,65 @@ pub(super) fn use_web_i18n_loader(
                 Tone::Ok,
             ));
         }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn use_web_visual_viewport_effect() {
+    use_effect(|| {
+        dioxus::document::eval(
+            r#"
+            (() => {
+                const viewport = window.visualViewport;
+                if (!viewport) return;
+
+                const applyViewport = () => {
+                    const height = Math.max(1, Math.round(viewport.height));
+                    const keyboardOpen = window.innerWidth <= 900
+                        && height < window.innerHeight - 120;
+                    document.documentElement.style.setProperty(
+                        '--rton-visual-viewport-height',
+                        `${height}px`,
+                    );
+                    document.documentElement.dataset.rtonKeyboard = keyboardOpen
+                        ? 'open'
+                        : 'closed';
+                };
+
+                if (!window.__rtonVisualViewportHandler) {
+                    window.__rtonVisualViewportHandler = applyViewport;
+                    viewport.addEventListener('resize', applyViewport, { passive: true });
+                    viewport.addEventListener('scroll', applyViewport, { passive: true });
+                    window.addEventListener('resize', applyViewport, { passive: true });
+                }
+                applyViewport();
+            })();
+            "#,
+        );
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn use_web_file_drop_guard() {
+    use_effect(|| {
+        dioxus::document::eval(
+            r#"
+            (() => {
+                if (window.__rtonFileDropGuard) return;
+                const blocksNativeFileDrop = (event) => {
+                    const transfer = event.dataTransfer;
+                    if (!transfer) return;
+                    const hasFiles = Array.from(transfer.types || []).includes('Files')
+                        || Array.from(transfer.items || []).some((item) => item.kind === 'file');
+                    if (hasFiles) {
+                        event.preventDefault();
+                    }
+                };
+                window.__rtonFileDropGuard = blocksNativeFileDrop;
+                document.addEventListener('dragover', blocksNativeFileDrop, true);
+                document.addEventListener('drop', blocksNativeFileDrop, true);
+            })();
+            "#,
+        );
     });
 }

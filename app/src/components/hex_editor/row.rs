@@ -7,13 +7,14 @@ use super::HexContextMenu;
 use super::logic::{
     byte_to_ascii, display_hex_cell, hex_ascii_class, hex_byte_class, to_offset_hex,
 };
-use super::state::{ByteSelection, HEX_BYTES_PER_ROW, HexPane, PendingHexEdit};
+use super::state::{ByteSelection, HexPane, PendingHexEdit};
 
 #[component]
 pub(super) fn HexRow(
     bytes: ByteDocument,
     row_index: usize,
     row_top: i64,
+    bytes_per_row: usize,
     offset_width: usize,
     selected_offset: usize,
     normalized_selection: Option<ByteSelection>,
@@ -24,8 +25,8 @@ pub(super) fn HexRow(
     on_enter: EventHandler<(usize, HexPane)>,
     on_context_menu: EventHandler<(usize, HexPane, HexContextMenu)>,
 ) -> Element {
-    let row_start = row_index * HEX_BYTES_PER_ROW;
-    let row_offsets = (row_start..row_start + HEX_BYTES_PER_ROW).collect::<Vec<_>>();
+    let row_start = row_index * bytes_per_row;
+    let row_offsets = (row_start..row_start + bytes_per_row).collect::<Vec<_>>();
 
     rsx! {
         div {

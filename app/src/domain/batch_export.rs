@@ -1,9 +1,10 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
+pub(crate) use rton_editor_core::encode_batch_export_document;
 pub(crate) use rton_editor_core::{
-    BatchExportMode, ZipArchiveBuilder, batch_output_path, encode_batch_export_document,
-    unique_zip_path,
+    BatchExportMode, ZipArchiveBuilder, batch_output_path, unique_zip_path,
 };
 #[cfg(test)]
 pub(crate) use rton_editor_core::{ZipFileEntry, create_zip_archive};

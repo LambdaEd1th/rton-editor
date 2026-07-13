@@ -35,22 +35,8 @@ pub async fn sleep_ms(milliseconds: u64) {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub async fn run_cpu_task<T, F>(task: F) -> T
-where
-    F: FnOnce() -> T + 'static,
-{
-    yield_to_browser().await;
-    task()
-}
-
-#[cfg(target_arch = "wasm32")]
 pub async fn sleep_ms(milliseconds: u64) {
     timeout(milliseconds as i32).await;
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn yield_to_browser() {
-    timeout(0).await;
 }
 
 #[cfg(target_arch = "wasm32")]

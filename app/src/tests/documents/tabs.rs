@@ -69,9 +69,9 @@ fn direct_text_buffer_tabs_use_text_buffer_surface_and_parse_on_demand() {
     .expect("tab opens");
 
     assert!(tab.doc.is_none());
-    assert_eq!(tab.editor_text.len(), text.len());
+    assert!(tab.editor_text.is_empty());
     assert_eq!(
-        tab.text_buffer.as_ref().map(|buffer| buffer.text.len()),
+        tab.text_buffer.as_ref().map(|buffer| buffer.byte_count()),
         Some(text.len())
     );
     assert!(matches!(

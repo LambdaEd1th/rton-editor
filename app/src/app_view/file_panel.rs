@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::ld_icons::{LdCheckCheck, LdFileArchive, LdSearch, LdSquare};
-use std::sync::Arc;
 
 use crate::components::{FileList, FileListItem, FileSelection, button_class, lucide_icon};
 use crate::domain::BatchExportMode;
+use crate::domain::IdentityArc;
 use crate::i18n::I18n;
 
 #[component]
@@ -13,7 +13,7 @@ pub(super) fn FilePanel(
     file_search: String,
     file_list_empty_message: String,
     file_list_items_empty: bool,
-    filtered_file_list_items: Arc<Vec<FileListItem>>,
+    filtered_file_list_items: IdentityArc<Vec<FileListItem>>,
     file_selection: FileSelection,
     selected_file_count: usize,
     selected_visible_file_count: usize,
@@ -30,7 +30,7 @@ pub(super) fn FilePanel(
     suppress_resize_observer: bool,
 ) -> Element {
     rsx! {
-        aside { class: "rton-side-panel rton-side-panel-left",
+        aside { id: "rton-file-drawer", class: "rton-side-panel rton-side-panel-left",
             header { class: "panel-header",
                 div { class: "panel-header-top",
                     div { class: "panel-header-main",

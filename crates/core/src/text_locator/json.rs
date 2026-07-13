@@ -1,4 +1,4 @@
-use rton_editor_core::{RtonValue, ValuePathSegment};
+use crate::{RtonValue, ValuePathSegment};
 
 use super::TextLocator;
 

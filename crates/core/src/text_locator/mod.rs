@@ -3,14 +3,15 @@ mod json;
 mod toml;
 mod yaml;
 
-use rton_editor_core::{RtonValue, TextFormat, ValuePathSegment, parse_value_path_segments};
+use crate::{RtonValue, TextFormat, ValuePathSegment, parse_value_path_segments};
+use serde::{Deserialize, Serialize};
 
-pub(crate) use common::offset_to_text_position;
+pub use common::offset_to_text_position;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TextPosition {
-    pub(crate) line: usize,
-    pub(crate) column: usize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TextPosition {
+    pub line: usize,
+    pub column: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +43,7 @@ pub(super) trait TextLocator {
     ) -> Option<usize>;
 }
 
-pub(crate) fn locate_value_path_in_text(
+pub fn locate_value_path_in_text(
     root: &RtonValue,
     path: &str,
     text: &str,

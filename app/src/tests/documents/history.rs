@@ -10,10 +10,16 @@ fn text_history_undo_and_redo_restore_editor_text() {
 
     assert!(tab_can_undo(&tab));
     undo_text_tab(&mut tab);
-    assert_eq!(tab.editor_text.as_ref(), "one");
+    assert_eq!(
+        tab.text_buffer.as_ref().map(|buffer| buffer.materialize()),
+        Some("one".to_string())
+    );
     assert!(tab_can_redo(&tab));
     redo_text_tab(&mut tab);
-    assert_eq!(tab.editor_text.as_ref(), "two");
+    assert_eq!(
+        tab.text_buffer.as_ref().map(|buffer| buffer.materialize()),
+        Some("two".to_string())
+    );
 }
 
 #[test]

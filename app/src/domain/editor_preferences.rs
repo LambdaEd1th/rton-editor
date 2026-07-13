@@ -9,6 +9,25 @@ pub(crate) enum EditorMode {
 }
 
 impl EditorMode {
+    pub(crate) fn from_code(code: &str) -> Option<Self> {
+        match code.trim().to_ascii_lowercase().as_str() {
+            "rton" => Some(Self::RtonHex),
+            "json" => Some(Self::Json),
+            "yaml" => Some(Self::Yaml),
+            "toml" => Some(Self::Toml),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::RtonHex => "rton",
+            Self::Json => "json",
+            Self::Yaml => "yaml",
+            Self::Toml => "toml",
+        }
+    }
+
     pub(crate) fn label(self) -> &'static str {
         match self {
             EditorMode::RtonHex => "RTON",
