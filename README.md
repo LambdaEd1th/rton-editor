@@ -214,4 +214,14 @@ dx build --platform web --package rton-editor-app --release --debug-symbols=fals
 
 ## License
 
-AGPL-3.0-or-later.
+Copyright (c) LambdaEd1th and contributors.
+
+The original source code in this repository is licensed under the
+[GNU Affero General Public License v3.0 or later](https://www.gnu.org/licenses/agpl-3.0.html)
+(`AGPL-3.0-or-later`). Modified versions distributed or made available over a
+network must comply with the AGPL source-code requirements. The software is
+provided without warranty.
+
+Third-party dependencies and assets retain their respective licenses. This is
+an unofficial project unaffiliated with PopCap or Electronic Arts; the license
+does not cover proprietary game files, assets, or trademarks.

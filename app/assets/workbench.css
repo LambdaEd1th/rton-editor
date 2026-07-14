@@ -2060,17 +2060,15 @@
   }
 
   .rton-commandbar-document {
-    min-width: 0;
-    max-width: none;
-    height: 44px;
-    flex: 1 1 auto;
-    border-radius: 20px;
+    display: none;
   }
 
   .rton-mobile-command-actions {
     display: flex;
-    flex: 0 0 auto;
+    min-width: 0;
+    flex: 1 1 auto;
     align-items: center;
+    justify-content: center;
     gap: 5px;
   }
 
@@ -2539,10 +2537,6 @@
     flex-basis: 44px;
   }
 
-  .rton-commandbar-document {
-    padding: 0 10px;
-  }
-
   .panel-header-top {
     display: grid;
   }
@@ -2560,10 +2554,6 @@
 
 @media (max-width: 380px) {
   .rton-mobile-command-actions .rton-command-icon-button:nth-child(4) {
-    display: none;
-  }
-
-  .rton-commandbar-document-dot {
     display: none;
   }
 
