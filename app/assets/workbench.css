@@ -610,8 +610,7 @@
 .rton-file-tabs {
   align-items: center;
   gap: 6px;
-  padding-left: 8px;
-  padding-right: 8px;
+  padding: 6px 8px;
 }
 
 .rton-file-tab {
@@ -2242,13 +2241,16 @@
 
   .rton-file-tabs {
     height: var(--rton-tab-strip-overlap);
+    overflow-x: hidden;
     padding: 5px 8px;
   }
 
   .rton-file-tab {
-    width: min(62vw, 220px);
+    width: auto;
+    min-width: 0;
+    max-width: 220px;
     height: 34px;
-    flex-basis: min(62vw, 220px);
+    flex: 1 1 156px;
   }
 
   .rton-file-tab-close {

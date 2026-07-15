@@ -719,20 +719,19 @@ textarea:focus-visible {
   max-width: 100%;
   align-items: flex-start;
   gap: 3px;
-  overflow-x: scroll;
+  overflow-x: hidden;
   overflow-y: hidden;
-  padding: 4px 10px var(--rton-tab-scrollbar-gutter);
-  scroll-padding-left: 10px;
-  scroll-padding-right: 10px;
+  padding: 6px 10px;
 }
 
 .rton-file-tab {
   display: flex;
   position: relative;
-  width: 180px;
-  min-width: 104px;
+  width: auto;
+  min-width: 0;
   max-width: 240px;
   height: 31px;
+  flex: 1 1 180px;
   align-items: center;
   overflow: hidden;
   border: 1px solid var(--color-border-strong);
@@ -3020,20 +3019,18 @@ textarea:focus-visible {
     width: 100%;
     height: var(--rton-tab-strip-overlap);
     align-items: center;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
+    overflow-x: hidden;
     padding: 4px 8px;
-    scroll-behavior: smooth;
-    scrollbar-width: none;
-    touch-action: pan-x;
-    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
 
   .rton-file-tab {
-    width: 156px;
+    width: auto;
+    min-width: 0;
+    max-width: 220px;
     height: 34px;
-    flex: 0 0 156px;
-    touch-action: pan-x;
+    flex: 1 1 156px;
+    touch-action: manipulation;
   }
 
   .rton-file-tab-close {

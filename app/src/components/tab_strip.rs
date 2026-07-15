@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 
 use crate::app_constants::TAB_DROP_MIDPOINT_PX;
@@ -29,34 +32,82 @@ fn file_tab_class(active: bool, dragging: bool, drop_placement: Option<DropPlace
     class_name
 }
 
-fn scroll_active_tab_into_view(active_tab_id: usize) {
-    document::eval(&format!(
-        r#"
-        (() => {{
-            const container = document.querySelector('.rton-file-tabs');
-            const tab = document.querySelector('.rton-file-tab[data-rton-tab-id="{active_tab_id}"]');
-            if (!container || !tab) return;
+#[component]
+fn FileTab(
+    tab: TabHeader,
+    active: bool,
+    dragging: bool,
+    drop_placement: Option<DropPlacement>,
+    draggable: bool,
+    i18n: I18n,
+    on_activate: EventHandler<usize>,
+    on_close: EventHandler<usize>,
+    on_drag_start: EventHandler<usize>,
+    on_drop_marker: EventHandler<DropMarker<usize>>,
+    on_drag_end: EventHandler<()>,
+) -> Element {
+    let rendered_width = use_hook(|| Rc::new(Cell::new(TAB_DROP_MIDPOINT_PX * 2.0)));
+    let mounted_width = rendered_width.clone();
+    let resized_width = rendered_width.clone();
+    let pointer_width = rendered_width;
 
-            const tabLeft = tab.offsetLeft;
-            const tabRight = tabLeft + tab.offsetWidth;
-            const visibleLeft = container.scrollLeft;
-            const visibleRight = visibleLeft + container.clientWidth;
-            const padding = 8;
-
-            if (tabLeft < visibleLeft + padding) {{
-                container.scrollTo({{
-                    left: Math.max(0, tabLeft - padding),
-                    behavior: 'smooth',
-                }});
-            }} else if (tabRight > visibleRight - padding) {{
-                container.scrollTo({{
-                    left: tabRight - container.clientWidth + padding,
-                    behavior: 'smooth',
-                }});
-            }}
-        }})();
-        "#
-    ));
+    rsx! {
+        div {
+            "data-rton-tab-id": "{tab.id}",
+            class: file_tab_class(active, dragging, drop_placement),
+            onmounted: move |event| {
+                let rendered_width = mounted_width.clone();
+                async move {
+                    if let Ok(rect) = event.get_client_rect().await {
+                        rendered_width.set(rect.width());
+                    }
+                }
+            },
+            onresize: move |event| {
+                if let Ok(size) = event.get_content_box_size() {
+                    resized_width.set(size.width);
+                }
+            },
+            onmousedown: move |_| {
+                if draggable {
+                    on_drag_start.call(tab.id);
+                }
+            },
+            onmousemove: move |event| {
+                event.prevent_default();
+                let placement = if event.element_coordinates().x < pointer_width.get() / 2.0 {
+                    DropPlacement::Before
+                } else {
+                    DropPlacement::After
+                };
+                on_drop_marker.call(DropMarker { id: tab.id, placement });
+            },
+            onmouseup: move |_| on_drag_end.call(()),
+            button {
+                class: "rton-file-tab-label",
+                role: "tab",
+                aria_selected: active,
+                onclick: move |_| on_activate.call(tab.id),
+                title: i18n.t_args("tabs-switch-to", &[("name", tab.file_name.clone())]),
+                span { class: "rton-file-tab-name", "{leaf_display_name(&tab.file_name)}" }
+                if tab.dirty {
+                    span { class: "rton-file-tab-dirty" }
+                }
+            }
+            button {
+                class: "rton-file-tab-close",
+                disabled: !tab.closeable,
+                title: i18n.t("title-close-tab"),
+                aria_label: i18n.t("title-close-tab"),
+                onmousedown: move |event| event.stop_propagation(),
+                onclick: move |event| {
+                    event.stop_propagation();
+                    on_close.call(tab.id);
+                },
+                "×"
+            }
+        }
+    }
 }
 
 #[component]
@@ -73,9 +124,6 @@ pub(crate) fn TabStrip(
     on_drag_end: EventHandler<()>,
 ) -> Element {
     let tab_count = tabs.len();
-    use_effect(use_reactive(&active_tab_id, move |active_tab_id| {
-        scroll_active_tab_into_view(active_tab_id);
-    }));
 
     rsx! {
         nav { class: "rton-tab-strip",
@@ -84,51 +132,21 @@ pub(crate) fn TabStrip(
                 role: "tablist",
                 aria_label: i18n.t("tabs-open-files"),
                 for tab in tabs {
-                    div {
-                        "data-rton-tab-id": "{tab.id}",
-                        class: file_tab_class(
-                            tab.id == active_tab_id,
-                            dragged_tab_id == Some(tab.id),
-                            drop_marker.filter(|marker| marker.id == tab.id).map(|marker| marker.placement),
-                        ),
-                        onmousedown: move |_| {
-                            if tab_count > 1 {
-                                on_drag_start.call(tab.id);
-                            }
-                        },
-                        onmousemove: move |event| {
-                            event.prevent_default();
-                            let placement = if event.element_coordinates().x < TAB_DROP_MIDPOINT_PX {
-                                DropPlacement::Before
-                            } else {
-                                DropPlacement::After
-                            };
-                            on_drop_marker.call(DropMarker { id: tab.id, placement });
-                        },
-                        onmouseup: move |_| on_drag_end.call(()),
-                        button {
-                            class: "rton-file-tab-label",
-                            role: "tab",
-                            aria_selected: tab.id == active_tab_id,
-                            onclick: move |_| on_activate.call(tab.id),
-                            title: i18n.t_args("tabs-switch-to", &[("name", tab.file_name.clone())]),
-                            span { class: "rton-file-tab-name", "{leaf_display_name(&tab.file_name)}" }
-                            if tab.dirty {
-                                span { class: "rton-file-tab-dirty" }
-                            }
-                        }
-                        button {
-                            class: "rton-file-tab-close",
-                            disabled: !tab.closeable,
-                            title: i18n.t("title-close-tab"),
-                            aria_label: i18n.t("title-close-tab"),
-                            onmousedown: move |event| event.stop_propagation(),
-                            onclick: move |event| {
-                                event.stop_propagation();
-                                on_close.call(tab.id);
-                            },
-                            "×"
-                        }
+                    FileTab {
+                        key: "{tab.id}",
+                        active: tab.id == active_tab_id,
+                        dragging: dragged_tab_id == Some(tab.id),
+                        drop_placement: drop_marker
+                            .filter(|marker| marker.id == tab.id)
+                            .map(|marker| marker.placement),
+                        draggable: tab_count > 1,
+                        tab,
+                        i18n,
+                        on_activate,
+                        on_close,
+                        on_drag_start,
+                        on_drop_marker,
+                        on_drag_end,
                     }
                 }
             }
