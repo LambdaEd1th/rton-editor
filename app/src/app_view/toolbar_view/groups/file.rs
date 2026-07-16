@@ -89,7 +89,6 @@ pub(super) fn FileToolbarGroup(
     mut status: Signal<Status>,
     open_native_files: EventHandler<()>,
     open_native_folder: EventHandler<()>,
-    load_sample: EventHandler<()>,
     on_files_staged: EventHandler<()>,
 ) -> Element {
     rsx! {
@@ -172,11 +171,6 @@ pub(super) fn FileToolbarGroup(
                     span { class: "button-icon", {lucide_icon(LdFolderOpen)} }
                     {i18n.t("toolbar-folder")}
                 }
-            }
-            button {
-                class: button_class("secondary"),
-                onclick: move |_| load_sample.call(()),
-                {i18n.t("toolbar-sample")}
             }
             span { class: "current-file",
                 "{active_file_label}"

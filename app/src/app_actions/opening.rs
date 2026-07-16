@@ -1,10 +1,14 @@
 use dioxus::prelude::*;
 
-use rton_editor_core::{BinaryEncoding, EncodeOptions, TextFormat};
+use rton_editor_core::{
+    BinaryEncoding, CoreError, EncodeOptions, RtonValue, encode_rton_bytes, value_to_text,
+};
 
-use crate::app_sample::SAMPLE_JSON;
 use crate::components::FileSelection;
-use crate::domain::{EditorMode, EditorTabState, OpenTabError, Status, Tone, create_text_tab};
+use crate::domain::{
+    ByteDocument, EditorMode, EditorTabState, OpenTabError, Status, Tone,
+    create_tab_from_byte_document, create_text_tab,
+};
 use crate::file_import::{
     LoadedFileState, create_tab_from_loaded_file, loaded_file_drafts_from_native,
     stage_loaded_file_drafts,
@@ -14,41 +18,49 @@ use crate::platform;
 
 use super::document::{parse_tab_by_id, switch_active_mode};
 
-pub(crate) fn load_sample_tab(
+pub(crate) fn create_blank_tab_state(
+    id: usize,
+    mode: EditorMode,
+    encode_options: EncodeOptions,
+) -> Result<EditorTabState, CoreError> {
+    let value = RtonValue::Object(Vec::new());
+    let file_name = format!("untitled-{id}.{}", mode.code());
+
+    if let Some(format) = mode.text_format() {
+        return create_text_tab(id, file_name, value_to_text(&value, format)?, format);
+    }
+
+    let bytes = encode_rton_bytes(
+        &value,
+        EncodeOptions {
+            encrypted: false,
+            ..encode_options
+        },
+    )?;
+    create_tab_from_byte_document(id, file_name, ByteDocument::from_vec(bytes))
+}
+
+pub(crate) fn open_blank_tab(
     mut next_tab_id: Signal<usize>,
     mut tabs: Signal<Vec<EditorTabState>>,
     mut active_tab_id: Signal<usize>,
-    preferred_mode: Option<EditorMode>,
+    mode: EditorMode,
     encode_options: EncodeOptions,
     mut status: Signal<Status>,
     i18n: I18n,
 ) {
     let id = *next_tab_id.read();
     next_tab_id.set(id + 1);
-    match create_text_tab(
-        id,
-        format!("sample-{id}.json"),
-        SAMPLE_JSON.to_string(),
-        TextFormat::Json,
-    ) {
+    match create_blank_tab_state(id, mode, encode_options) {
         Ok(tab) => {
             let name = tab.file_name.clone();
             tabs.write().push(tab);
             active_tab_id.set(id);
             status.set(Status::new(
-                i18n.t_args("status-sample-opened", &[("name", name)]),
+                i18n.t_args("status-blank-created", &[("name", name)]),
                 Tone::Ok,
             ));
-            apply_preferred_mode_or_parse(
-                id,
-                EditorMode::Json,
-                preferred_mode,
-                encode_options,
-                tabs,
-                active_tab_id,
-                status,
-                i18n,
-            );
+            parse_tab_by_id(id, tabs, status, i18n);
         }
         Err(error) => status.set(Status::new(error.to_string(), Tone::Error)),
     }

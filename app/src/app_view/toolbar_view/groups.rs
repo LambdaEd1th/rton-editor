@@ -42,7 +42,6 @@ pub(super) fn ToolbarGroupContent(
     status: Signal<Status>,
     open_native_files: EventHandler<()>,
     open_native_folder: EventHandler<()>,
-    load_sample: EventHandler<()>,
     on_files_staged: EventHandler<()>,
     undo_edit: EventHandler<()>,
     redo_edit: EventHandler<()>,
@@ -62,7 +61,6 @@ pub(super) fn ToolbarGroupContent(
                 status,
                 open_native_files,
                 open_native_folder,
-                load_sample,
                 on_files_staged
             }
         },

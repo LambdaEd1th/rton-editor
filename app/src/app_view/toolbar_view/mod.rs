@@ -51,7 +51,6 @@ struct ToolbarGroupRowsContext {
     open_native_files: EventHandler<()>,
     open_native_folder: EventHandler<()>,
     on_files_staged: EventHandler<()>,
-    load_sample: EventHandler<()>,
     undo_edit: EventHandler<()>,
     redo_edit: EventHandler<()>,
     on_compact_change: EventHandler<bool>,
@@ -174,7 +173,6 @@ pub(super) fn ToolbarView(
     open_native_files: EventHandler<()>,
     open_native_folder: EventHandler<()>,
     on_files_staged: EventHandler<()>,
-    load_sample: EventHandler<()>,
     undo_edit: EventHandler<()>,
     redo_edit: EventHandler<()>,
     on_switch_mode: EventHandler<EditorMode>,
@@ -233,7 +231,6 @@ pub(super) fn ToolbarView(
         open_native_files,
         open_native_folder,
         on_files_staged,
-        load_sample,
         undo_edit,
         redo_edit,
         on_compact_change,
@@ -503,7 +500,6 @@ fn ToolbarGroupRows(context: ToolbarGroupRowsContext) -> Element {
         open_native_files,
         open_native_folder,
         on_files_staged,
-        load_sample,
         undo_edit,
         redo_edit,
         on_compact_change,
@@ -562,10 +558,6 @@ fn ToolbarGroupRows(context: ToolbarGroupRowsContext) -> Element {
                                 open_native_folder: EventHandler::new(move |_| {
                                     on_dismiss.call(());
                                     open_native_folder.call(());
-                                }),
-                                load_sample: EventHandler::new(move |_| {
-                                    on_dismiss.call(());
-                                    load_sample.call(());
                                 }),
                                 on_files_staged: EventHandler::new(move |_| {
                                     on_dismiss.call(());

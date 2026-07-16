@@ -2,8 +2,10 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use dioxus_free_icons::icons::ld_icons::LdPlus;
 
 use crate::app_constants::TAB_DROP_MIDPOINT_PX;
+use crate::components::lucide_icon;
 use crate::domain::{DropMarker, DropPlacement, EditorMode, leaf_display_name};
 use crate::i18n::I18n;
 
@@ -116,9 +118,11 @@ pub(crate) fn TabStrip(
     active_tab_id: usize,
     dragged_tab_id: Option<usize>,
     drop_marker: Option<DropMarker<usize>>,
+    new_tab_mode: EditorMode,
     i18n: I18n,
     on_activate: EventHandler<usize>,
     on_close: EventHandler<usize>,
+    on_new: EventHandler<()>,
     on_drag_start: EventHandler<usize>,
     on_drop_marker: EventHandler<DropMarker<usize>>,
     on_drag_end: EventHandler<()>,
@@ -148,6 +152,20 @@ pub(crate) fn TabStrip(
                         on_drop_marker,
                         on_drag_end,
                     }
+                }
+                button {
+                    r#type: "button",
+                    class: "rton-new-tab",
+                    title: i18n.t_args(
+                        "tabs-new-file",
+                        &[("format", new_tab_mode.label().to_string())],
+                    ),
+                    aria_label: i18n.t_args(
+                        "tabs-new-file",
+                        &[("format", new_tab_mode.label().to_string())],
+                    ),
+                    onclick: move |_| on_new.call(()),
+                    {lucide_icon(LdPlus)}
                 }
             }
         }

@@ -4442,7 +4442,7 @@ dependencies = [
 
 [[package]]
 name = "rton-editor-app"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "dioxus",
  "dioxus-free-icons",
@@ -4466,7 +4466,7 @@ dependencies = [
 
 [[package]]
 name = "rton_editor_core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "hex",
  "rayon",
@@ -4481,7 +4481,7 @@ dependencies = [
 
 [[package]]
 name = "rton_editor_worker"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "console_error_panic_hook",
  "rton_editor_core",

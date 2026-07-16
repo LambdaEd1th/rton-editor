@@ -2,6 +2,7 @@ mod app_actions;
 mod app_constants;
 mod app_i18n;
 mod app_layout;
+#[cfg(test)]
 mod app_sample;
 mod app_view;
 mod application;

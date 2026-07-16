@@ -22,7 +22,7 @@ pub(crate) use file_selection::{
     toggle_selected_file_key, toggle_selected_file_path,
 };
 pub(crate) use opening::{
-    activate_tab_by_id, load_sample_tab, open_loaded_file_by_id, open_native_files_dialog,
+    activate_tab_by_id, open_blank_tab, open_loaded_file_by_id, open_native_files_dialog,
     open_native_folder_dialog,
 };
 pub(crate) use tabs::{
@@ -37,5 +37,7 @@ pub(crate) use toolbar::{finish_toolbar_drag_state, initial_toolbar_rows};
 
 #[cfg(test)]
 pub(crate) use editing::{redo_hex_tab, redo_text_tab, undo_hex_tab, undo_text_tab};
+#[cfg(test)]
+pub(crate) use opening::create_blank_tab_state;
 #[cfg(test)]
 pub(crate) use tabs::reorder_tabs_by_id;

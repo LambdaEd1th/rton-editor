@@ -1,6 +1,6 @@
 use crate::app_actions::{
-    redo_hex_tab, redo_text_tab, reorder_tabs_by_id, tab_can_redo, tab_can_undo,
-    tab_requires_close_confirmation, undo_hex_tab, undo_text_tab,
+    create_blank_tab_state, redo_hex_tab, redo_text_tab, reorder_tabs_by_id, tab_can_redo,
+    tab_can_undo, tab_requires_close_confirmation, undo_hex_tab, undo_text_tab,
 };
 use crate::app_constants::{PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, TEXT_SEARCH_MATCH_DISPLAY_LIMIT};
 use crate::app_i18n::{load_i18n_sources, resolve_locale};

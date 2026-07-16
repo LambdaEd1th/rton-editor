@@ -414,12 +414,15 @@ fn Workbench() -> Element {
         validate_active_tab(tabs, active_tab_id, status, i18n);
     };
 
-    let load_sample = move |_| {
-        load_sample_tab(
+    let new_tab_mode_snapshot = active_mode_snapshot
+        .or(preferred_editor_mode_snapshot)
+        .unwrap_or(EditorMode::RtonHex);
+    let create_blank_tab = move |_| {
+        open_blank_tab(
             next_tab_id,
             tabs,
             active_tab_id,
-            *preferred_editor_mode.read(),
+            new_tab_mode_snapshot,
             rton_display_encode_options(*compact_output.read()),
             status,
             i18n,
@@ -834,7 +837,6 @@ fn Workbench() -> Element {
                 on_files_staged: EventHandler::new(move |_| {
                     reveal_file_drawer_after_commit(file_drawer_open, inspector_drawer_open)
                 }),
-                load_sample: EventHandler::new(move |_| load_sample(())),
                 undo_edit,
                 redo_edit,
                 on_switch_mode: EventHandler::new(switch_mode),
@@ -888,9 +890,11 @@ fn Workbench() -> Element {
                             active_tab_id: active_id_snapshot,
                             dragged_tab_id: dragged_tab_id_snapshot,
                             drop_marker: tab_drop_marker_snapshot,
+                            new_tab_mode: new_tab_mode_snapshot,
                             i18n,
                             on_activate: activate_tab,
                             on_close: request_close_tab,
+                            on_new: create_blank_tab,
                             on_drag_start: start_tab_drag,
                             on_drop_marker: update_tab_drop_marker,
                             on_drag_end: finish_tab_drag

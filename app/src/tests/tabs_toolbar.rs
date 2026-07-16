@@ -70,6 +70,36 @@ fn round_trips_editor_mode_preference_codes() {
 }
 
 #[test]
+fn creates_valid_blank_tabs_for_every_editor_mode() {
+    let options = EncodeOptions {
+        encoding: BinaryEncoding::Compact,
+        encrypted: true,
+    };
+
+    for mode in [
+        EditorMode::RtonHex,
+        EditorMode::Json,
+        EditorMode::Yaml,
+        EditorMode::Toml,
+    ] {
+        let tab = create_blank_tab_state(7, mode, options).expect("blank tab is created");
+
+        assert_eq!(tab.file_name, format!("untitled-7.{}", mode.code()));
+        assert_eq!(tab.mode, mode);
+        assert!(!tab.dirty);
+        assert_eq!(
+            document_for_tab(&tab).expect("blank tab parses").value,
+            RtonValue::Object(Vec::new())
+        );
+
+        if mode == EditorMode::RtonHex {
+            assert_eq!(tab.source_encode_options.encoding, BinaryEncoding::Compact);
+            assert!(!tab.source_encode_options.encrypted);
+        }
+    }
+}
+
+#[test]
 fn normalizes_toolbar_rows_and_appends_missing_groups() {
     let rows = normalize_toolbar_rows(Some(
         r#"[["prefs","file","file","unknown"],["about","format"],["edit"]]"#,
