@@ -44,17 +44,12 @@ rton-editor/
 ## Requirements
 
 - Rust stable
-- Rust nightly with `rust-src` for the shared-memory worker build
 - `wasm32-unknown-unknown` Rust target for web builds
-- `wasm-pack` 0.15 for building the worker backends
+- `wasm-pack` 0.15 for building the worker runtime
 - Dioxus CLI 0.7.9 for serving and building the web app
 
 ```bash
 rustup target add wasm32-unknown-unknown
-rustup toolchain install nightly-2025-07-01 \
-  --profile minimal \
-  --component rust-src \
-  --target wasm32-unknown-unknown
 cargo install wasm-pack --version 0.15.0 --locked
 cargo install dioxus-cli --version 0.7.9 --locked
 ```
@@ -79,10 +74,9 @@ Run the web app during development:
 ./scripts/serve-web.sh --port 8080 --open false
 ```
 
-This builds both worker backends and starts Dioxus with the COOP/COEP headers
-required by `SharedArrayBuffer`. Running `dx serve` without
-`--cross-origin-policy` keeps the app functional but selects the single-thread
-worker fallback.
+This builds the stable Rust worker runtime and starts Dioxus. The browser uses
+an independent Worker pool and does not require `SharedArrayBuffer` or special
+cross-origin isolation headers.
 
 Run the desktop app:
 
@@ -115,18 +109,6 @@ The current Dioxus release output is written under:
 ```text
 target/dx/rton-editor/release/web/public
 ```
-
-Production hosting must return these headers for every application and worker
-asset response:
-
-```text
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: require-corp
-```
-
-[`deploy/_headers`](deploy/_headers) is ready for hosts such as Cloudflare
-Pages. GitHub Pages does not apply custom response headers, so the same release
-automatically uses the single-thread worker there.
 
 Build a native release binary:
 
@@ -206,9 +188,9 @@ dx build --platform web --package rton-editor-app --release --debug-symbols=fals
   wrapper in `app/assets/worker/rton-worker.js`.
 - The Dioxus UI remains a normal single-thread Wasm module. CPU-heavy parsing,
   conversion, indexing, text/hex search, and batch export run in a persistent
-  worker. On a cross-origin-isolated origin that worker loads the atomics-enabled
-  backend and initializes a Rayon pool; otherwise it loads the compatible
-  single-thread backend.
+  pool of one to four independent Web Workers built with stable Rust. The
+  coordinator keeps cached documents on their owning Worker and distributes
+  independent batch jobs across the pool without `wasm-bindgen-rayon`.
 - The UI is optimized for large files with virtual scrolling and deferred
   parsing/conversion paths, but browser memory limits still apply to web builds.
 

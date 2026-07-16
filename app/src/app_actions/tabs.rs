@@ -11,6 +11,10 @@ use super::workspace_reducer::{
     reorder_tabs_by_id_in_state,
 };
 
+pub(crate) fn tab_requires_close_confirmation(tabs: &[EditorTabState], id: usize) -> bool {
+    tabs.iter().any(|tab| tab.id == id && tab.dirty)
+}
+
 pub(crate) fn close_tab_by_id(
     id: usize,
     tabs: Signal<Vec<EditorTabState>>,

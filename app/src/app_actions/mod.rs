@@ -27,7 +27,7 @@ pub(crate) use opening::{
 };
 pub(crate) use tabs::{
     close_tab_by_id, finish_tab_drag_state, remove_file_list_item_by_key,
-    remove_file_list_items_by_keys,
+    remove_file_list_items_by_keys, tab_requires_close_confirmation,
 };
 pub(crate) use text_editor_search::{
     go_to_next_text_match, go_to_previous_text_match, handle_text_find_key,

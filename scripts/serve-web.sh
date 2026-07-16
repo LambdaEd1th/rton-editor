@@ -8,5 +8,4 @@ cd "$repo_root"
 exec dx serve \
   --package rton-editor-app \
   --platform web \
-  --cross-origin-policy \
   "$@"

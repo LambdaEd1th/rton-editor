@@ -19,6 +19,17 @@ fn reorders_tab_before_target() {
 }
 
 #[test]
+fn dirty_tabs_require_close_confirmation() {
+    let mut dirty_tab = tab(2);
+    dirty_tab.dirty = true;
+    let tabs = vec![tab(1), dirty_tab];
+
+    assert!(!tab_requires_close_confirmation(&tabs, 1));
+    assert!(tab_requires_close_confirmation(&tabs, 2));
+    assert!(!tab_requires_close_confirmation(&tabs, 3));
+}
+
+#[test]
 fn clamps_panel_width_to_original_bounds() {
     assert_eq!(clamp_panel_width(120.0), PANEL_MIN_WIDTH);
     assert_eq!(clamp_panel_width(333.4), 333);

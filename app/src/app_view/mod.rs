@@ -10,7 +10,8 @@ use crate::app_constants::{DESKTOP_WINDOW_MIN_HEIGHT, DESKTOP_WINDOW_MIN_WIDTH};
 use crate::app_i18n::*;
 use crate::app_layout::StatusBar;
 use crate::components::{
-    PanelResizeDrag, PanelResizeHandle, PanelSide, TabStrip, file_path_matches_scope,
+    PanelResizeDrag, PanelResizeHandle, PanelSide, TabStrip, UnsavedChangesDialog,
+    file_path_matches_scope,
 };
 use crate::domain::{
     BatchExportMode, ByteDocument, EditorMode, HexEdit, IdentityArc, Status, TextBuffer,
@@ -149,6 +150,7 @@ fn Workbench() -> Element {
     } = signals;
 
     let active_id_snapshot = *active_tab_id.read();
+    let mut pending_close_tab_id = use_signal(|| None::<usize>);
     let rton_output_size = use_signal(|| None::<RtonOutputSize>);
     let rton_output_size_generation = use_signal(|| 0_u64);
     #[cfg(not(target_arch = "wasm32"))]
@@ -228,6 +230,12 @@ fn Workbench() -> Element {
             tab_headers_for_tabs(&tabs_snapshot),
         )
     };
+    let pending_close_file_name = (*pending_close_tab_id.read()).and_then(|id| {
+        tabs.read()
+            .iter()
+            .find(|tab| tab.id == id)
+            .map(|tab| tab.file_name.clone())
+    });
     let compact_snapshot = *compact_output.read();
     let encrypt_snapshot = *encrypt_output.read();
     use_rton_output_size_effect(
@@ -437,9 +445,23 @@ fn Workbench() -> Element {
         );
     };
 
-    let close_tab = move |id: usize| {
+    let request_close_tab = move |id: usize| {
+        if tab_requires_close_confirmation(&tabs.read(), id) {
+            pending_close_tab_id.set(Some(id));
+            return;
+        }
         close_tab_by_id(id, tabs, active_tab_id, status, i18n);
         unlink_loaded_file_tab(loaded_files, id);
+    };
+
+    let cancel_pending_close = move |_| pending_close_tab_id.set(None);
+    let discard_pending_close = move |_| {
+        let pending_id = *pending_close_tab_id.peek();
+        pending_close_tab_id.set(None);
+        if let Some(id) = pending_id {
+            close_tab_by_id(id, tabs, active_tab_id, status, i18n);
+            unlink_loaded_file_tab(loaded_files, id);
+        }
     };
 
     let remove_file_list_item = move |key: String| {
@@ -868,7 +890,7 @@ fn Workbench() -> Element {
                             drop_marker: tab_drop_marker_snapshot,
                             i18n,
                             on_activate: activate_tab,
-                            on_close: close_tab,
+                            on_close: request_close_tab,
                             on_drag_start: start_tab_drag,
                             on_drop_marker: update_tab_drop_marker,
                             on_drag_end: finish_tab_drag
@@ -945,6 +967,14 @@ fn Workbench() -> Element {
                 active_file_label,
                 output_value: output_value_label,
                 status: status_snapshot
+            }
+            if let Some(file_name) = pending_close_file_name {
+                UnsavedChangesDialog {
+                    file_name,
+                    i18n,
+                    on_cancel: cancel_pending_close,
+                    on_discard: discard_pending_close
+                }
             }
         }
     }

@@ -370,12 +370,12 @@ pub fn perform_worker_text_surface(
 
 pub fn perform_worker_open_text(request: WorkerOpenTextRequest) -> Result<WorkerOpenTextOutcome> {
     let text = String::from_utf8_lossy(&request.bytes).to_string();
-    #[cfg(feature = "wasm-threads")]
+    #[cfg(not(target_arch = "wasm32"))]
     let (line_count, parsed) = rayon::join(
         || text_line_count(&text),
         || parse_text(&text, request.format).ok(),
     );
-    #[cfg(not(feature = "wasm-threads"))]
+    #[cfg(target_arch = "wasm32")]
     let (line_count, parsed) = (
         text_line_count(&text),
         parse_text(&text, request.format).ok(),
@@ -460,7 +460,7 @@ fn worker_mode_switch_parts(
     encode_options: EncodeOptions,
     search_query: &str,
 ) -> Result<(WorkerSurface, (TreeRows, Option<ValueSearchResult>))> {
-    #[cfg(feature = "wasm-threads")]
+    #[cfg(not(target_arch = "wasm32"))]
     {
         let (surface, metadata) = rayon::join(
             || worker_surface_for_document(doc, mode, encode_options),
@@ -468,7 +468,7 @@ fn worker_mode_switch_parts(
         );
         Ok((surface?, metadata))
     }
-    #[cfg(not(feature = "wasm-threads"))]
+    #[cfg(target_arch = "wasm32")]
     {
         Ok((
             worker_surface_for_document(doc, mode, encode_options)?,
@@ -487,11 +487,11 @@ fn worker_document_metadata(
         (!search_query.trim().is_empty())
             .then(|| search_value_tree(&doc.value, search_query, usize::MAX))
     };
-    #[cfg(feature = "wasm-threads")]
+    #[cfg(not(target_arch = "wasm32"))]
     {
         rayon::join(tree, search)
     }
-    #[cfg(not(feature = "wasm-threads"))]
+    #[cfg(target_arch = "wasm32")]
     {
         (tree(), search())
     }

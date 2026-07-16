@@ -35,6 +35,11 @@ about-author = Autor
 about-github = GitHub
 about-close = Cerrar
 
+unsaved-changes-title = ¿Descartar los cambios sin guardar?
+unsaved-changes-description = { $name } contiene cambios que no se han exportado.
+unsaved-changes-cancel = Cancelar
+unsaved-changes-discard = Descartar y cerrar
+
 theme-system = Sistema
 theme-light = Claro
 theme-dark = Oscuro

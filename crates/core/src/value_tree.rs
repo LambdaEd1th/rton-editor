@@ -58,7 +58,7 @@ pub fn flatten_expanded_value_tree(
     expanded_paths: &HashSet<String>,
     limit: usize,
 ) -> TreeRows {
-    #[cfg(any(not(target_arch = "wasm32"), feature = "wasm-threads"))]
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(rows) = flatten_expanded_value_tree_parallel_top_level(value, expanded_paths, limit)
     {
         return rows;
@@ -77,7 +77,7 @@ pub fn flatten_expanded_value_tree(
     }
 }
 
-#[cfg(any(not(target_arch = "wasm32"), feature = "wasm-threads"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn flatten_expanded_value_tree_parallel_top_level(
     value: &Value,
     expanded_paths: &HashSet<String>,

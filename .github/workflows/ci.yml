@@ -38,13 +38,6 @@ jobs:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
 
-      - name: Setup nightly WASM threads toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2025-07-01
-          components: rust-src
-          targets: wasm32-unknown-unknown
-
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
@@ -56,11 +49,6 @@ jobs:
 
       - name: Check wasm
         run: cargo +stable check --workspace --target wasm32-unknown-unknown
-
-      - name: Check threaded worker
-        env:
-          RUSTFLAGS: -C target-feature=+atomics,+bulk-memory
-        run: cargo +nightly-2025-07-01 check -Z build-std=panic_abort,std --target wasm32-unknown-unknown --package rton_editor_worker --features wasm-threads
 
       - name: Test
         run: cargo +stable test --workspace --all-targets
@@ -78,13 +66,6 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
-
-      - name: Setup nightly WASM threads toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2025-07-01
-          components: rust-src
           targets: wasm32-unknown-unknown
 
       - name: Cache Rust

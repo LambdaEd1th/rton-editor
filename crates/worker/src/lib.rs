@@ -7,9 +7,6 @@ use std::{
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-#[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
-pub use wasm_bindgen_rayon::init_thread_pool;
-
 use rton_editor_core::{
     DecodedDocument, WorkerBatchItemResponse, WorkerBatchRequest, WorkerBatchResponse,
     WorkerBatchSource, WorkerDocumentSource, WorkerHexSearchRequest, WorkerLocateTextRequest,
@@ -240,14 +237,8 @@ fn to_js_value<T: Serialize + ?Sized>(value: &T) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub fn rton_worker_runtime_info() -> Result<JsValue, JsValue> {
-    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
     let info = WorkerRuntimeInfo {
-        backend: "threaded",
-        thread_count: rayon::current_num_threads(),
-    };
-    #[cfg(not(all(target_arch = "wasm32", feature = "wasm-threads")))]
-    let info = WorkerRuntimeInfo {
-        backend: "single",
+        backend: "worker",
         thread_count: 1,
     };
     to_js_value(&info)
@@ -484,14 +475,6 @@ pub fn rton_worker_batch(request: JsValue) -> Result<JsValue, JsValue> {
         })
         .collect::<Vec<_>>();
 
-    #[cfg(all(target_arch = "wasm32", feature = "wasm-threads"))]
-    let results = {
-        use rayon::prelude::*;
-        jobs.into_par_iter()
-            .map(|job| process_batch_job(job, request.mode, request.encode_options))
-            .collect::<Vec<_>>()
-    };
-    #[cfg(not(all(target_arch = "wasm32", feature = "wasm-threads")))]
     let results = jobs
         .into_iter()
         .map(|job| process_batch_job(job, request.mode, request.encode_options))

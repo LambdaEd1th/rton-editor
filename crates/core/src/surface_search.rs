@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::ByteRead;
 
 pub const SURFACE_SEARCH_MATCH_LIMIT: usize = 5_000;
-#[cfg(feature = "wasm-threads")]
+#[cfg(not(target_arch = "wasm32"))]
 const PARALLEL_SEARCH_MIN_BYTES: usize = 512 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,7 +38,7 @@ pub fn find_text_search_result(text: &str, query: &str, case_sensitive: bool) ->
         };
     }
 
-    #[cfg(feature = "wasm-threads")]
+    #[cfg(not(target_arch = "wasm32"))]
     if text.len() >= PARALLEL_SEARCH_MIN_BYTES && query.is_ascii() {
         return find_text_search_result_parallel(text, query.as_bytes(), case_sensitive);
     }
@@ -71,7 +71,7 @@ fn find_text_search_result_sequential(
     TextSearchResult { matches, capped }
 }
 
-#[cfg(feature = "wasm-threads")]
+#[cfg(not(target_arch = "wasm32"))]
 fn find_text_search_result_parallel(
     text: &str,
     query: &[u8],
@@ -170,7 +170,7 @@ pub fn find_hex_search_result<B: ByteRead + Sync + ?Sized>(
         };
     }
 
-    #[cfg(feature = "wasm-threads")]
+    #[cfg(not(target_arch = "wasm32"))]
     if bytes.len() >= PARALLEL_SEARCH_MIN_BYTES {
         return find_hex_search_result_parallel(bytes, pattern, ascii_insensitive);
     }
@@ -205,7 +205,7 @@ fn find_hex_search_result_sequential<B: ByteRead + ?Sized>(
     HexSearchResult { matches, capped }
 }
 
-#[cfg(feature = "wasm-threads")]
+#[cfg(not(target_arch = "wasm32"))]
 fn find_hex_search_result_parallel<B: ByteRead + Sync + ?Sized>(
     bytes: &B,
     pattern: &[u8],

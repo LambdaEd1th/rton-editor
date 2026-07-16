@@ -35,6 +35,11 @@ about-author = Auteur
 about-github = GitHub
 about-close = Fermer
 
+unsaved-changes-title = Abandonner les modifications non enregistrées ?
+unsaved-changes-description = { $name } contient des modifications qui n'ont pas été exportées.
+unsaved-changes-cancel = Annuler
+unsaved-changes-discard = Abandonner et fermer
+
 theme-system = Systeme
 theme-light = Clair
 theme-dark = Sombre

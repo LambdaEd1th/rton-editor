@@ -35,6 +35,11 @@ about-author = Автор
 about-github = GitHub
 about-close = Закрыть
 
+unsaved-changes-title = Отменить несохранённые изменения?
+unsaved-changes-description = В файле { $name } есть изменения, которые не были экспортированы.
+unsaved-changes-cancel = Отмена
+unsaved-changes-discard = Отменить изменения и закрыть
+
 theme-system = Системная
 theme-light = Светлая
 theme-dark = Темная

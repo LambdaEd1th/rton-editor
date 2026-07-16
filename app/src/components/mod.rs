@@ -6,6 +6,7 @@ pub(crate) mod tab_strip;
 pub(crate) mod text_editor;
 pub(crate) mod toolbar;
 pub(crate) mod ui_helpers;
+pub(crate) mod unsaved_changes_dialog;
 pub(crate) mod value_panels;
 
 pub(crate) use file_list::{
@@ -19,6 +20,7 @@ pub(crate) use tab_strip::{TabHeader, TabStrip};
 pub(crate) use text_editor::TextJumpTarget;
 pub(crate) use toolbar::ToolbarGroup;
 pub(crate) use ui_helpers::{button_class, clamp_panel_width, lucide_icon};
+pub(crate) use unsaved_changes_dialog::UnsavedChangesDialog;
 #[cfg(test)]
 #[cfg(test)]
 pub(crate) use value_panels::value_tree_visible_indices;

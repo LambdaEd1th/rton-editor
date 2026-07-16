@@ -35,6 +35,11 @@ about-author = 作者
 about-github = GitHub
 about-close = 关闭
 
+unsaved-changes-title = 放弃未保存的更改？
+unsaved-changes-description = { $name } 包含尚未导出的更改。
+unsaved-changes-cancel = 取消
+unsaved-changes-discard = 放弃并关闭
+
 theme-system = 跟随系统
 theme-light = 浅色
 theme-dark = 深色

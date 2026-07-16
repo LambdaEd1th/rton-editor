@@ -154,13 +154,6 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Setup nightly WASM threads toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2025-07-01
-          components: rust-src
-          targets: wasm32-unknown-unknown
-
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
@@ -192,7 +185,6 @@ jobs:
             --debug-symbols=false \
             --base-path "/${REPO_NAME}/"
           touch "${WEB_DIST}/.nojekyll"
-          cp deploy/_headers "${WEB_DIST}/_headers"
 
       - name: Package web artifact
         run: |

@@ -1,7 +1,6 @@
 *
 !.gitignore
 !rton-worker.js
-!single/
-!single/**
-!threaded/
-!threaded/**
+!rton-worker-runtime.js
+!pkg/
+!pkg/**
