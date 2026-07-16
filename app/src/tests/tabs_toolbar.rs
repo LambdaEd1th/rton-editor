@@ -87,14 +87,25 @@ fn creates_valid_blank_tabs_for_every_editor_mode() {
         assert_eq!(tab.file_name, format!("untitled-7.{}", mode.code()));
         assert_eq!(tab.mode, mode);
         assert!(!tab.dirty);
-        assert_eq!(
-            document_for_tab(&tab).expect("blank tab parses").value,
-            RtonValue::Object(Vec::new())
-        );
+        let document = document_for_tab(&tab).expect("blank tab parses");
 
-        if mode == EditorMode::RtonHex {
-            assert_eq!(tab.source_encode_options.encoding, BinaryEncoding::Compact);
-            assert!(!tab.source_encode_options.encrypted);
+        match mode {
+            EditorMode::RtonHex => {
+                assert_eq!(document.value, RtonValue::Object(Vec::new()));
+                assert_eq!(tab.source_encode_options.encoding, BinaryEncoding::Compact);
+                assert!(!tab.source_encode_options.encrypted);
+            }
+            EditorMode::Json => {
+                assert_eq!(tab.text_buffer.unwrap().materialize(), "{}");
+                assert_eq!(document.value, RtonValue::Object(Vec::new()));
+            }
+            EditorMode::Yaml => {
+                assert_eq!(tab.text_buffer.unwrap().materialize(), "---\n");
+            }
+            EditorMode::Toml => {
+                assert_eq!(tab.text_buffer.unwrap().materialize(), "\n");
+                assert_eq!(document.value, RtonValue::Object(Vec::new()));
+            }
         }
     }
 }
