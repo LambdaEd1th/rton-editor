@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use rton_editor_core::{
-    BinaryEncoding, CoreError, EncodeOptions, RtonValue, TextFormat, encode_rton_bytes,
+    BinaryEncoding, CoreError, EncodeOptions, RtonValue, encode_rton_bytes, value_to_text,
 };
 
 use crate::components::FileSelection;
@@ -23,22 +23,13 @@ pub(crate) fn create_blank_tab_state(
     mode: EditorMode,
     encode_options: EncodeOptions,
 ) -> Result<EditorTabState, CoreError> {
+    let value = RtonValue::Object(Vec::new());
     let file_name = format!("untitled-{id}.{}", mode.code());
 
-    match mode {
-        EditorMode::Json => {
-            return create_text_tab(id, file_name, "{}".to_string(), TextFormat::Json);
-        }
-        EditorMode::Yaml => {
-            return create_text_tab(id, file_name, "---\n".to_string(), TextFormat::Yaml);
-        }
-        EditorMode::Toml => {
-            return create_text_tab(id, file_name, "\n".to_string(), TextFormat::Toml);
-        }
-        EditorMode::RtonHex => {}
+    if let Some(format) = mode.text_format() {
+        return create_text_tab(id, file_name, value_to_text(&value, format)?, format);
     }
 
-    let value = RtonValue::Object(Vec::new());
     let bytes = encode_rton_bytes(
         &value,
         EncodeOptions {

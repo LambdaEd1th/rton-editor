@@ -18,6 +18,81 @@ fn parses_editor_json_with_rton_strings() {
 }
 
 #[test]
+fn empty_documents_round_trip_across_every_worker_mode() {
+    let empty = Value::Object(Vec::new());
+    let text_surfaces = [
+        (TextFormat::Json, "{}"),
+        (TextFormat::Yaml, "---\n"),
+        (TextFormat::Toml, "\n"),
+    ];
+
+    for (format, text) in text_surfaces {
+        assert_eq!(
+            value_to_text(&empty, format).expect("empty value renders"),
+            text
+        );
+        assert_eq!(
+            parse_text(text, format).expect("empty text parses").value,
+            empty
+        );
+    }
+
+    let rton = encode_rton_bytes(&empty, EncodeOptions::default()).expect("empty RTON encodes");
+    let sources = [
+        WorkerDocumentSource::RtonBytes(rton),
+        WorkerDocumentSource::Text {
+            text: "{}".to_string(),
+            format: TextFormat::Json,
+        },
+        WorkerDocumentSource::Text {
+            text: "---\n".to_string(),
+            format: TextFormat::Yaml,
+        },
+        WorkerDocumentSource::Text {
+            text: "\n".to_string(),
+            format: TextFormat::Toml,
+        },
+    ];
+    let targets = [
+        (WorkerEditorMode::RtonHex, None),
+        (WorkerEditorMode::Json, Some((TextFormat::Json, "{}"))),
+        (WorkerEditorMode::Yaml, Some((TextFormat::Yaml, "---\n"))),
+        (WorkerEditorMode::Toml, Some((TextFormat::Toml, "\n"))),
+    ];
+
+    for source in sources {
+        for (target_mode, expected_text) in targets {
+            let outcome = perform_worker_mode_switch(WorkerModeSwitchRequest {
+                previous_document_id: None,
+                source: Some(source.clone()),
+                target_mode,
+                search_query: String::new(),
+                encode_options: EncodeOptions::default(),
+            })
+            .expect("empty document switches mode");
+            assert_eq!(outcome.document.value, empty);
+
+            match (outcome.response.surface, expected_text) {
+                (WorkerSurface::RtonBytes(bytes), None) => {
+                    assert_eq!(
+                        decode_rton_bytes(&bytes).expect("empty RTON decodes").value,
+                        empty
+                    );
+                }
+                (
+                    WorkerSurface::Text { text, format, .. },
+                    Some((expected_format, expected_text)),
+                ) => {
+                    assert_eq!(format, expected_format);
+                    assert_eq!(text, expected_text);
+                }
+                _ => panic!("worker returned the wrong empty surface kind"),
+            }
+        }
+    }
+}
+
+#[test]
 fn round_trips_standard_rton_bytes() {
     let doc = parse_text(SAMPLE, TextFormat::Json).expect("json parses");
     let bytes = encode_rton_bytes(&doc.value, EncodeOptions::default()).expect("rton encodes");

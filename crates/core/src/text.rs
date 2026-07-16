@@ -13,6 +13,7 @@ pub struct TextRender {
 pub fn parse_text(text: &str, format: TextFormat) -> Result<DecodedDocument> {
     let mut value = match format {
         TextFormat::Json => parse_editor_json(text)?,
+        TextFormat::Yaml if is_empty_yaml_document(text) => Value::Object(Vec::new()),
         TextFormat::Yaml => serde_yaml::from_str::<Value>(text)?,
         TextFormat::Toml => toml::from_str::<Value>(text)?,
     };
@@ -21,6 +22,10 @@ pub fn parse_text(text: &str, format: TextFormat) -> Result<DecodedDocument> {
 }
 
 pub fn value_to_text(value: &Value, format: TextFormat) -> Result<String> {
+    if let Some(text) = empty_object_text(value, format) {
+        return Ok(text.to_string());
+    }
+
     match format {
         TextFormat::Json => {
             ensure_json_safe_value(value)?;
@@ -36,6 +41,10 @@ pub fn value_to_text_limited(
     format: TextFormat,
     max_bytes: usize,
 ) -> Result<TextRender> {
+    if let Some(text) = empty_object_text(value, format) {
+        return Ok(limit_text(text.to_string(), max_bytes));
+    }
+
     match format {
         TextFormat::Json => value_to_json_limited(value, max_bytes),
         TextFormat::Yaml => {
@@ -47,6 +56,25 @@ pub fn value_to_text_limited(
             Ok(limit_text(text, max_bytes))
         }
     }
+}
+
+fn is_empty_yaml_document(text: &str) -> bool {
+    matches!(text.trim(), "" | "---" | "...")
+}
+
+fn empty_object_text(value: &Value, format: TextFormat) -> Option<&'static str> {
+    let Value::Object(entries) = value else {
+        return None;
+    };
+    if !entries.is_empty() {
+        return None;
+    }
+
+    Some(match format {
+        TextFormat::Json => "{}",
+        TextFormat::Yaml => "---\n",
+        TextFormat::Toml => "\n",
+    })
 }
 
 fn value_to_json_limited(value: &Value, max_bytes: usize) -> Result<TextRender> {
