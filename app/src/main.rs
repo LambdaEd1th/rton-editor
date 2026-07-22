@@ -17,11 +17,26 @@ mod tests;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
+    platform::log_buffer::init_wasm(log::LevelFilter::Debug);
+    log::info!(
+        target: "rton_editor::startup",
+        "RTON Editor v{} starting on WebAssembly",
+        env!("CARGO_PKG_VERSION")
+    );
     dioxus::launch(app_view::App);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
+    let logger = env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Info)
+        .build();
+    platform::log_buffer::init(Box::new(logger), log::LevelFilter::Debug);
+    log::info!(
+        target: "rton_editor::startup",
+        "RTON Editor v{} starting on native",
+        env!("CARGO_PKG_VERSION")
+    );
     launch_desktop_app();
 }
 
@@ -129,7 +144,7 @@ fn save_desktop_window_size(window: &dioxus::desktop::tao::window::Window) {
         return;
     };
     if let Err(error) = platform::save_window_size_preference(width, height) {
-        eprintln!("failed to save window size preference: {error}");
+        log::warn!(target: "rton_editor::preferences", "Failed to save window size preference: {error}");
     }
 }
 
@@ -170,6 +185,6 @@ fn save_desktop_window_size_from_physical(width: u32, height: u32, scale_factor:
     let width = logical_size.width.round().max(0.0) as u32;
     let height = logical_size.height.round().max(0.0) as u32;
     if let Err(error) = platform::save_window_size_preference(width, height) {
-        eprintln!("failed to save window size preference: {error}");
+        log::warn!(target: "rton_editor::preferences", "Failed to save window size preference: {error}");
     }
 }

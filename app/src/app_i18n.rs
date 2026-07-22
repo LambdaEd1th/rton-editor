@@ -8,7 +8,7 @@ use crate::platform;
 pub(crate) fn load_i18n_sources() -> usize {
     platform::read_i18n_sources()
         .into_iter()
-        .filter(|source| i18n::install_locale(&source.code, &source.source).is_ok())
+        .filter(|source| install_locale_source(&source.code, &source.source))
         .count()
 }
 
@@ -22,7 +22,7 @@ pub(crate) fn load_i18n_sources() -> usize {
         ("zh-CN", include_str!("../assets/i18n/zh-CN.ftl")),
     ]
     .into_iter()
-    .filter(|(code, source)| i18n::install_locale(code, source).is_ok())
+    .filter(|(code, source)| install_locale_source(code, source))
     .count()
 }
 
@@ -31,8 +31,18 @@ pub(crate) async fn load_i18n_sources_async() -> usize {
     platform::read_i18n_sources_async()
         .await
         .into_iter()
-        .filter(|source| i18n::install_locale(&source.code, &source.source).is_ok())
+        .filter(|source| install_locale_source(&source.code, &source.source))
         .count()
+}
+
+fn install_locale_source(code: &str, source: &str) -> bool {
+    match i18n::install_locale(code, source) {
+        Ok(_) => true,
+        Err(error) => {
+            log::warn!(target: "rton_editor::i18n", "Failed to load locale {code}: {error}");
+            false
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

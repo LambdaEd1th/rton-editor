@@ -1,5 +1,6 @@
 mod dialogs;
 mod i18n_sources;
+pub mod log_buffer;
 mod preferences;
 mod save;
 mod task;

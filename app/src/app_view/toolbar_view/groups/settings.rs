@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::ld_icons::{
-    LdCheck, LdChevronDown, LdGithub, LdInfo, LdLanguages, LdMonitor, LdMoon, LdSettings, LdSun,
-    LdX,
+    LdCheck, LdChevronDown, LdGithub, LdInfo, LdLanguages, LdMonitor, LdMoon, LdScrollText,
+    LdSettings, LdSun, LdX,
 };
 
-use crate::components::lucide_icon;
+use crate::components::{LogViewerDialog, lucide_icon};
 use crate::domain::{Status, ThemePreference, Tone};
 use crate::i18n::{I18n, LanguageOption, Locale};
 use crate::platform;
@@ -48,6 +48,7 @@ pub(crate) fn SettingsDialog(
     on_close: EventHandler<()>,
 ) -> Element {
     let mut language_open = use_signal(|| false);
+    let mut logs_open = use_signal(|| false);
     let language_open_snapshot = *language_open.read();
     let title = i18n.t("settings-title");
     let close_label = i18n.t("about-close");
@@ -172,6 +173,20 @@ pub(crate) fn SettingsDialog(
                         }
                     }
 
+                    section { class: "rton-settings-section rton-settings-logs-section",
+                        div { class: "rton-settings-section-heading",
+                            span { class: "rton-settings-section-icon", {lucide_icon(LdScrollText)} }
+                            span { {i18n.t("settings-logs")} }
+                        }
+                        button {
+                            r#type: "button",
+                            class: "rton-settings-action-button",
+                            onclick: move |_| logs_open.set(true),
+                            {lucide_icon(LdScrollText)}
+                            span { {i18n.t("settings-logs-open")} }
+                        }
+                    }
+
                     section { class: "rton-settings-section rton-settings-about-section",
                         div { class: "rton-settings-section-heading",
                             span { class: "rton-settings-section-icon", {lucide_icon(LdInfo)} }
@@ -209,6 +224,13 @@ pub(crate) fn SettingsDialog(
                         }
                     }
                 }
+            }
+        }
+        if *logs_open.read() {
+            LogViewerDialog {
+                i18n,
+                status,
+                on_close: move |_| logs_open.set(false),
             }
         }
     }

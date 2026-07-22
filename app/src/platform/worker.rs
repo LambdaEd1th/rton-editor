@@ -82,12 +82,14 @@ impl WorkerClient {
             } else {
                 event.message()
             };
+            log::error!(target: "rton_editor::worker", "{message}");
             let error = JsValue::from_str(&message);
             for (_, request) in error_pending.borrow_mut().drain() {
                 let _ = request.reject.call1(&JsValue::UNDEFINED, &error);
             }
         });
         worker.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+        log::info!(target: "rton_editor::worker", "Web Worker initialized");
 
         Ok(Self {
             worker,

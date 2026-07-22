@@ -1154,7 +1154,7 @@ fn save_desktop_viewport_size(width: f64, height: f64, mut last_saved: Signal<Op
     last_saved.set(Some(next_size));
 
     if let Err(error) = crate::platform::save_window_size_preference(width, height) {
-        eprintln!("failed to save window size preference: {error}");
+        log::warn!(target: "rton_editor::preferences", "Failed to save window size preference: {error}");
     }
 }
 
