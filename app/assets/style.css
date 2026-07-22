@@ -56,6 +56,25 @@ textarea:focus-visible {
   outline-offset: 1px;
 }
 
+:where(
+  input:not([type]),
+  input:is(
+    [type="text"],
+    [type="search"],
+    [type="number"],
+    [type="email"],
+    [type="url"],
+    [type="password"],
+    [type="tel"]
+  ),
+  textarea,
+  [contenteditable]:not([contenteditable="false"])
+) {
+  user-select: text;
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+}
+
 .app-shell {
   display: flex;
   width: 100vw;
@@ -68,6 +87,9 @@ textarea:focus-visible {
   background: var(--color-bg);
   color: var(--color-text);
   color-scheme: var(--color-scheme);
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
 }
 
 .rton-toolbar {
@@ -919,6 +941,7 @@ textarea:focus-visible {
   background: transparent;
   cursor: col-resize;
   touch-action: none;
+  outline: none;
 }
 
 .rton-resize-handle-left {
@@ -931,17 +954,24 @@ textarea:focus-visible {
 
 .rton-resize-handle::after {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 2px;
-  width: 1px;
-  background: var(--color-border);
+  top: 12px;
+  bottom: 12px;
+  left: 50%;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--color-text-muted) 28%, transparent);
   content: "";
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: background-color 140ms ease, opacity 140ms ease;
 }
 
-.rton-resize-handle:hover,
-.rton-resize-handle.dragging {
-  background: color-mix(in srgb, var(--color-accent) 22%, var(--color-bg));
+.rton-resize-handle:hover::after,
+.rton-resize-handle:focus-visible::after,
+.rton-resize-handle.dragging::after,
+.rton-workspace-shell.resizing-panel .rton-resize-handle::after {
+  background: color-mix(in srgb, var(--color-accent) 72%, transparent);
+  opacity: 1;
 }
 
 .rton-editor-stage {

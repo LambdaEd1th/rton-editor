@@ -690,13 +690,8 @@
   background: transparent;
 }
 
-.rton-resize-handle::after,
 .rton-hex-inspector-resize-handle::after {
   background: var(--wb-border);
-}
-
-.rton-resize-handle::after {
-  display: none;
 }
 
 .rton-editor-stage,
